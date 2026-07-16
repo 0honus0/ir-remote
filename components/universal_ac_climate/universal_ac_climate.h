@@ -4,7 +4,6 @@
 #include "esphome/components/globals/globals_component.h"
 #include "esphome/components/select/select.h"
 #include "esphome/components/script/script.h"
-#include "esphome/components/switch/switch.h"
 #include "esphome/core/component.h"
 #include "universal_ac.h"
 
@@ -17,7 +16,6 @@ class UniversalAcClimate : public climate::Climate, public PollingComponent {
   }
   void set_fan_storage(select::Select *storage) { this->fan_storage_ = storage; }
   void set_swing_storage(select::Select *storage) { this->swing_storage_ = storage; }
-  void set_power_storage(switch_::Switch *storage) { this->power_storage_ = storage; }
   void set_power_off_reset(script::Script<> *reset) { this->power_off_reset_ = reset; }
   void setup() override { this->sync_state_(); }
   void update() override { this->sync_state_(); }
@@ -127,8 +125,6 @@ class UniversalAcClimate : public climate::Climate, public PollingComponent {
     universal_ac.apply_climate(power, mode, temperature, fan, swing_v,
                                stdAc::swingh_t::kOff, false, universal_ac.turbo(), false,
                                sleep, universal_ac.sleep_mode());
-    if (this->power_storage_ != nullptr)
-      this->power_storage_->publish_state(power);
     if (!power && this->power_off_reset_ != nullptr)
       this->power_off_reset_->execute();
     this->sync_state_();
@@ -192,7 +188,6 @@ class UniversalAcClimate : public climate::Climate, public PollingComponent {
   globals::RestoringGlobalsComponent<float> *temperature_storage_{nullptr};
   select::Select *fan_storage_{nullptr};
   select::Select *swing_storage_{nullptr};
-  switch_::Switch *power_storage_{nullptr};
   script::Script<> *power_off_reset_{nullptr};
 };
 

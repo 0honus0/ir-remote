@@ -168,7 +168,7 @@ class UniversalAc {
   stdAc::swingh_t swing_h() const { return swing_h_; }
 
   void restore(const std::string &protocol, float temperature, const std::string &mode,
-               const std::string &fan, bool light) {
+               const std::string &fan, const std::string &swing_v, bool light) {
     set_protocol(protocol);
     temperature_ = temperature < 16 ? 16 : (temperature > 30 ? 30 : temperature);
     power_ = false;
@@ -190,6 +190,7 @@ class UniversalAc {
     else mode_ = stdAc::opmode_t::kCool;
 
     this->clear_power_off_state_();
+    set_swing_v(swing_v);
 
     status_ = "已恢复已保存的设置";
     update_profile_();
@@ -286,10 +287,9 @@ class UniversalAc {
     timer_deadline_ms_ = 0;
   }
 
-  // Values in this group are one-shot/run-time controls, never retained
-  // across a power-off or device restart.
+  // Values in this group are one-shot/run-time controls. Vertical airflow is
+  // intentionally retained and restored independently by ESPHome.
   void clear_power_off_state_() {
-    swing_v_ = stdAc::swingv_t::kOff;
     swing_h_ = stdAc::swingh_t::kOff;
     turbo_ = false;
     sleep_mode_ = false;
@@ -346,13 +346,12 @@ class UniversalAc {
 static UniversalAc universal_ac;
 static void ac_begin() { universal_ac.begin(); }
 static bool ac_set_protocol(const std::string &value) { return universal_ac.set_protocol(value); }
-static void ac_set_power(bool value) { universal_ac.set_power(value); }
 static void ac_set_fan(const std::string &value) { universal_ac.set_fan(value); }
 static void ac_set_swing_v(const std::string &value) { universal_ac.set_swing_v(value); }
 static void ac_set_feature(const std::string &feature, bool value) { universal_ac.set_feature(feature, value); }
 static void ac_set_sleep(float minutes) { universal_ac.set_sleep(minutes); }
 static void ac_set_special_mode(const std::string &value) { universal_ac.set_special_mode(value); }
 static void ac_restore(const std::string &protocol, float temperature, const std::string &mode,
-                       const std::string &fan, bool light) {
-  universal_ac.restore(protocol, temperature, mode, fan, light);
+                       const std::string &fan, const std::string &swing_v, bool light) {
+  universal_ac.restore(protocol, temperature, mode, fan, swing_v, light);
 }

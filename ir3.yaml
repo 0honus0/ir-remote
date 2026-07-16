@@ -1,5 +1,6 @@
 ﻿esphome:
   name: ir-remote
+  name_add_mac_suffix: true
   includes:
     - universal_ac.h
   platformio_options:
@@ -26,7 +27,9 @@
             ac_restore(id(ac_protocol_saved), id(ac_saved_temperature),
                        id(ac_saved_mode),
                        std::string(id(ac_fan).current_option().c_str()),
+                       std::string(id(ac_swing_v).current_option().c_str()),
                        id(ac_display_light).state);
+        - component.update: firmware_version
 
 esp8266:
   board: esp12e
@@ -76,6 +79,9 @@ web_server:
     - id: ac_protocol_group
       name: "空调协议"
       sorting_weight: 10
+    - id: ac_control_group
+      name: "空调控制"
+      sorting_weight: 20
     - id: wifi_settings_group
       name: "WiFi 设置"
       sorting_weight: 90
@@ -144,15 +150,12 @@ output:
     id: led_blue
 
 script:
-  # 关机清除的数据：本机定时、垂直风向、特殊模式。
+  # 关机清除的数据：本机定时和特殊模式。送风方向保持不变。
   # UniversalAc 同步清除红外编码状态；本脚本仅同步 ESPHome 实体状态。
   - id: ac_clear_power_off_state
     mode: single
     then:
       - lambda: 'id(ac_sleep).publish_state(0);'
-      - select.set_index:
-          id: ac_swing_v
-          index: 0
       - select.set_index:
           id: ac_special_mode
           index: 0
@@ -217,7 +220,9 @@ interval:
             lambda: 'return universal_ac.timer_expired();'
           then:
             - lambda: 'ESP_LOGI("ac_timer", "Shutdown timer expired; turning AC off.");'
-            - switch.turn_off: ac_power
+            - climate.control:
+                id: ha_universal_ac
+                mode: "OFF"
 
 sensor:
   - platform: template
@@ -247,6 +252,13 @@ text_sensor:
     lambda: 'return universal_ac.status();'
     update_interval: 1s
 
+  - platform: template
+    name: "固件版本 [firmware_version]"
+    id: firmware_version
+    icon: "mdi:calendar"
+    lambda: 'return std::string(__DATE__);'
+    update_interval: never
+
 climate:
   - platform: universal_ac_climate
     name: "空调遥控 [ac_climate]"
@@ -254,7 +266,6 @@ climate:
     temperature_storage: ac_saved_temperature
     fan_storage: ac_fan
     swing_storage: ac_swing_v
-    power_storage: ac_power
     power_off_reset: ac_clear_power_off_state
     update_interval: 1s
     on_state:
@@ -405,9 +416,11 @@ select:
       - script.execute: led_action_flash
 
   - platform: template
-    name: "内部风速 [ac_fan_store]"
+    name: "风速设置 [ac_fan]"
     id: ac_fan
-    disabled_by_default: true
+    web_server:
+      sorting_group_id: ac_control_group
+      sorting_weight: 10
     optimistic: true
     restore_value: true
     initial_option: "自动"
@@ -431,7 +444,7 @@ select:
     name: "送风方向 [ac_swing]"
     id: ac_swing_v
     optimistic: true
-    restore_value: false
+    restore_value: true
     initial_option: "关闭"
     options: ["关闭", "自动", "最高", "偏高", "中上", "中间", "偏低", "最低"]
     set_action:
@@ -461,25 +474,6 @@ number:
       - script.execute: led_action_flash
 
 switch:
-  # 电源为运行状态，始终以关机状态启动，不写入 EEPROM。
-  - platform: template
-    name: "空调开关 [ac_power]"
-    id: ac_power
-    icon: "mdi:air-conditioner"
-    optimistic: true
-    restore_mode: RESTORE_DEFAULT_OFF
-    turn_on_action:
-      - lambda: 'ac_set_power(true);'
-      - lambda: 'id(ac_power).publish_state(true);'
-      - component.update: ha_universal_ac
-      - script.execute: led_action_flash
-    turn_off_action:
-      - lambda: 'ac_set_power(false);'
-      - lambda: 'id(ac_power).publish_state(false);'
-      - script.execute: ac_clear_power_off_state
-      - component.update: ha_universal_ac
-      - script.execute: led_action_flash
-
   # 关机后保留且写入 EEPROM 的空调设定。
   - platform: template
     name: "面板灯开关 [ac_light]"
