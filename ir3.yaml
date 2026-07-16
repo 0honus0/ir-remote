@@ -45,11 +45,17 @@ wifi:
   ap:  # 万一连不上WiFi，开个热点方便救砖
     ssid: "honus-fallback"
     password: "12345678"
+    # The fallback AP only starts after station association fails. Keep this
+    # short so a powered-off/unavailable router can be recovered quickly.
+    ap_timeout: 15s
   on_connect:
     then:
       - lambda: 'id(wifi_status) = "已连接";'
       - component.update: current_wifi_ssid
       - script.stop: led_wifi_missing_blink
+      - script.stop: led_error_flash
+      # Stopping a script during its delay leaves the GPIO at its last level.
+      - output.turn_off: led_red
       - script.execute: led_wifi_flash
   on_disconnect:
     then:
@@ -181,6 +187,16 @@ script:
       - delay: 250ms
       - output.turn_off: led_red
 
+interval:
+  - interval: 1s
+    then:
+      - if:
+          condition:
+            lambda: 'return universal_ac.timer_expired();'
+          then:
+            - lambda: 'ESP_LOGI("ac_timer", "Shutdown timer expired; turning AC off.");'
+            - switch.turn_off: ac_power
+
 sensor:
   - platform: template
     id: ir_send_event
@@ -214,6 +230,7 @@ climate:
     name: "空调遥控 [ac_climate]"
     id: ha_universal_ac
     temperature_storage: ac_temperature
+    mode_storage: ac_mode
     fan_storage: ac_fan
     swing_storage: ac_swing_v
     special_storage: ac_special_mode
@@ -338,8 +355,11 @@ select:
       - "约克_YORK_自动"
     set_action:
       - lambda: |-
-          id(ac_protocol_saved) = x;
-          ac_set_protocol(x);
+          if (ac_set_protocol(x)) {
+            id(ac_protocol_saved) = x;
+          } else {
+            id(ac_protocol).publish_state(id(ac_protocol_saved));
+          }
       - script.execute: led_action_flash
 
   - platform: template
@@ -372,6 +392,8 @@ select:
     restore_value: true
     initial_option: "自动"
     options: ["自动", "最小", "低", "中", "高", "最大"]
+    set_action:
+      - lambda: 'ac_set_fan(x);'
   - platform: template
     name: "送风方向 [ac_swing]"
     id: ac_swing_v
@@ -394,19 +416,27 @@ number:
     min_value: 16
     max_value: 30
     step: 1
+    set_action:
+      - lambda: 'ac_set_temperature(x);'
 
   - platform: template
-    name: "定时分钟 [ac_timer]"
+    name: "关机定时分钟 [ac_timer]"
     id: ac_sleep
     optimistic: true
     restore_value: false
     initial_value: 0
     min_value: 0
     max_value: 720
-    step: 10
+    step: 1
     mode: box
     set_action:
-      - lambda: 'ac_set_sleep(x);'
+      - lambda: |-
+          ac_set_sleep(x);
+          if (x > 0) {
+            ESP_LOGI("ac_timer", "Shutdown timer set for %.0f minutes.", x);
+          } else {
+            ESP_LOGI("ac_timer", "Shutdown timer cancelled.");
+          }
       - script.execute: led_action_flash
 
 switch:
@@ -418,13 +448,13 @@ switch:
     restore_mode: RESTORE_DEFAULT_OFF
     turn_on_action:
       - lambda: 'ac_set_power_with_mode(true, std::string(id(ac_mode).current_option().c_str()));'
+      - lambda: 'id(ac_power).publish_state(true);'
       - component.update: ha_universal_ac
       - script.execute: led_action_flash
     turn_off_action:
       - lambda: 'ac_set_power(false);'
-      - number.set:
-          id: ac_sleep
-          value: 0
+      - lambda: 'id(ac_power).publish_state(false);'
+      - lambda: 'id(ac_sleep).publish_state(0);'
       - select.set_index:
           id: ac_swing_v
           index: 0

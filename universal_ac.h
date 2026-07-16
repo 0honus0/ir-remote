@@ -16,12 +16,12 @@ class UniversalAc {
     update_profile_();
   }
 
-  void set_protocol(const std::string &protocol) {
+  bool set_protocol(const std::string &protocol) {
     const size_t first_separator = protocol.find('_');
     const size_t last_separator = protocol.rfind('_');
     if (first_separator == std::string::npos || first_separator == last_separator) {
       status_ = "协议配置格式错误";
-      return;
+      return false;
     }
     const std::string brand = protocol.substr(0, first_separator);
     const std::string protocol_code = protocol.substr(first_separator + 1, last_separator - first_separator - 1);
@@ -29,21 +29,22 @@ class UniversalAc {
     const auto type = strToDecodeType(protocol_code.c_str());
     if (!IRac::isProtocolSupported(type)) {
       status_ = "当前固件不支持该协议";
-      return;
+      return false;
+    }
+    int16_t model = default_model_(type);
+    if (model_code != "自动") {
+      model = IRac::strToModel(model_code.c_str(), -1);
+      if (model < 0 || irutils::modelToStr(type, model) == "Unknown") {
+        status_ = "该型号不适用于当前协议";
+        return false;
+      }
     }
     brand_ = brand;
     protocol_ = protocol_code;
-    model_ = default_model_(type);
-    if (model_code != "自动") {
-      const int16_t model = IRac::strToModel(model_code.c_str(), -1);
-      if (model < 0 || irutils::modelToStr(type, model) == "Unknown") {
-        status_ = "该型号不适用于当前协议";
-        return;
-      }
-      model_ = model;
-    }
+    model_ = model;
     status_ = "已选择空调协议";
     update_profile_();
+    return true;
   }
 
   void set_power(bool value) {
@@ -52,7 +53,7 @@ class UniversalAc {
       swing_v_ = stdAc::swingv_t::kOff;
       turbo_ = false;
       sleep_mode_ = false;
-      sleep_ = -1;
+      clear_timer_();
       clean_ = false;
     }
     send_();
@@ -123,12 +124,11 @@ class UniversalAc {
   }
   void set_sleep(float minutes) {
     if (minutes <= 0) {
-      sleep_ = -1;
+      clear_timer_();
       return;
     }
     sleep_ = static_cast<int16_t>(minutes);
-    send_();
-    sleep_ = -1;
+    timer_deadline_ms_ = millis() + static_cast<uint32_t>(sleep_) * 60UL * 1000UL;
   }
   void set_special_mode(const std::string &value) {
     turbo_ = value == "强力";
@@ -150,17 +150,24 @@ class UniversalAc {
     quiet_ = quiet;
     turbo_ = power ? turbo : false;
     econo_ = econo;
-    sleep_ = sleep;
+    (void) sleep;
     sleep_mode_ = power ? sleep_mode : false;
-    if (!power_) clean_ = false;
+    if (!power_) {
+      clear_timer_();
+      clean_ = false;
+    }
     send_();
   }
 
   bool power() const { return power_; }
+  void set_sending_suspended(bool suspended) { sending_suspended_ = suspended; }
   uint32_t send_sequence() const { return send_sequence_; }
   float temperature() const { return temperature_; }
   int16_t sleep() const { return sleep_; }
   bool sleep_mode() const { return sleep_mode_; }
+  bool timer_expired() const {
+    return timer_deadline_ms_ != 0 && static_cast<int32_t>(millis() - timer_deadline_ms_) >= 0;
+  }
   bool quiet() const { return quiet_; }
   bool turbo() const { return turbo_; }
   bool econo() const { return econo_; }
@@ -172,6 +179,7 @@ class UniversalAc {
   void restore(const std::string &protocol, float temperature, const std::string &mode,
                const std::string &fan, const std::string &swing_v, bool power,
                const std::string &special_mode, bool light, float sleep) {
+    (void) sleep;
     set_protocol(protocol);
     temperature_ = temperature < 16 ? 16 : (temperature > 30 ? 30 : temperature);
     power_ = power;
@@ -189,7 +197,7 @@ class UniversalAc {
     else if (fan == "最大") fan_ = stdAc::fanspeed_t::kMax;
     else fan_ = stdAc::fanspeed_t::kAuto;
     swing_h_ = stdAc::swingh_t::kOff;
-    sleep_ = sleep <= 0 ? -1 : static_cast<int16_t>(sleep);
+    clear_timer_();
     sleep_mode_ = special_mode == "睡眠";
 
     if (mode == "制热") mode_ = stdAc::opmode_t::kHeat;
@@ -297,13 +305,19 @@ class UniversalAc {
     profile_ += model_name == "Unknown" ? "自动" : model_name.c_str();
   }
 
+  void clear_timer_() {
+    sleep_ = -1;
+    timer_deadline_ms_ = 0;
+  }
+
   void send_() {
+    if (sending_suspended_) return;
     const auto type = strToDecodeType(protocol_.c_str());
     if (!IRac::isProtocolSupported(type)) {
       status_ = "当前固件不支持该协议";
       return;
     }
-    const int16_t ir_sleep = sleep_mode_ ? 0 : sleep_;
+    const int16_t ir_sleep = sleep_mode_ ? 0 : -1;
     const bool sent = ir_.sendAc(type, model_, power_, mode_, temperature_, true, fan_, swing_v_, swing_h_, quiet_, turbo_,
                                  econo_, light_, filter_, clean_, beep_, ir_sleep);
     if (sent) send_sequence_++;
@@ -319,6 +333,8 @@ class UniversalAc {
   int16_t model_{1};
   float temperature_{26};
   int16_t sleep_{-1};
+  uint32_t timer_deadline_ms_{0};
+  bool sending_suspended_{false};
   bool sleep_mode_{false};
   bool power_{false};
   bool quiet_{false};
@@ -337,12 +353,14 @@ class UniversalAc {
 
 static UniversalAc universal_ac;
 static void ac_begin() { universal_ac.begin(); }
-static void ac_set_protocol(const std::string &value) { universal_ac.set_protocol(value); }
+static bool ac_set_protocol(const std::string &value) { return universal_ac.set_protocol(value); }
 static void ac_set_power(bool value) { universal_ac.set_power(value); }
 static void ac_set_power_with_mode(bool value, const std::string &mode) {
   universal_ac.set_power_with_mode(value, mode);
 }
 static void ac_set_mode(const std::string &value) { universal_ac.set_mode(value); }
+static void ac_set_temperature(float value) { universal_ac.set_temperature(value); }
+static void ac_set_fan(const std::string &value) { universal_ac.set_fan(value); }
 static void ac_set_swing_v(const std::string &value) { universal_ac.set_swing_v(value); }
 static void ac_set_feature(const std::string &feature, bool value) { universal_ac.set_feature(feature, value); }
 static void ac_set_sleep(float minutes) { universal_ac.set_sleep(minutes); }

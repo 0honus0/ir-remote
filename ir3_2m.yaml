@@ -1,0 +1,8 @@
+# 4 MB ESP-12E: roughly 1.98 MiB for the running firmware and the OTA image.
+# Flash this configuration once over serial before using OTA.
+packages:
+  base: !include ir3.yaml
+
+esphome:
+  platformio_options:
+    board_build.ldscript: ../../../partitions/eagle.flash.4m.ota-1980k.ld
