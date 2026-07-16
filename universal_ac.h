@@ -49,13 +49,7 @@ class UniversalAc {
 
   void set_power(bool value) {
     power_ = value;
-    if (!power_) {
-      swing_v_ = stdAc::swingv_t::kOff;
-      turbo_ = false;
-      sleep_mode_ = false;
-      clear_timer_();
-      clean_ = false;
-    }
+    if (!power_) this->clear_power_off_state_();
     send_();
   }
   void set_power_with_mode(bool value, const std::string &mode) {
@@ -145,17 +139,14 @@ class UniversalAc {
     mode_ = mode;
     temperature_ = temperature < 16 ? 16 : (temperature > 30 ? 30 : temperature);
     fan_ = fan;
-    swing_v_ = power ? swing_v : stdAc::swingv_t::kOff;
+    swing_v_ = swing_v;
     swing_h_ = swing_h;
     quiet_ = quiet;
-    turbo_ = power ? turbo : false;
+    turbo_ = turbo;
     econo_ = econo;
     (void) sleep;
-    sleep_mode_ = power ? sleep_mode : false;
-    if (!power_) {
-      clear_timer_();
-      clean_ = false;
-    }
+    sleep_mode_ = sleep_mode;
+    if (!power_) this->clear_power_off_state_();
     send_();
   }
 
@@ -177,18 +168,14 @@ class UniversalAc {
   stdAc::swingh_t swing_h() const { return swing_h_; }
 
   void restore(const std::string &protocol, float temperature, const std::string &mode,
-               const std::string &fan, const std::string &swing_v, bool power,
-               const std::string &special_mode, bool light, float sleep) {
-    (void) sleep;
+               const std::string &fan, bool light) {
     set_protocol(protocol);
     temperature_ = temperature < 16 ? 16 : (temperature > 30 ? 30 : temperature);
-    power_ = power;
-    turbo_ = special_mode == "强力";
+    power_ = false;
     light_ = light;
     quiet_ = false;
     econo_ = false;
     filter_ = false;
-    clean_ = special_mode == "干燥";
     beep_ = false;
     if (fan == "最小") fan_ = stdAc::fanspeed_t::kMin;
     else if (fan == "低") fan_ = stdAc::fanspeed_t::kLow;
@@ -196,24 +183,13 @@ class UniversalAc {
     else if (fan == "高") fan_ = stdAc::fanspeed_t::kHigh;
     else if (fan == "最大") fan_ = stdAc::fanspeed_t::kMax;
     else fan_ = stdAc::fanspeed_t::kAuto;
-    swing_h_ = stdAc::swingh_t::kOff;
-    clear_timer_();
-    sleep_mode_ = special_mode == "睡眠";
-
     if (mode == "制热") mode_ = stdAc::opmode_t::kHeat;
     else if (mode == "除湿") mode_ = stdAc::opmode_t::kDry;
     else if (mode == "送风") mode_ = stdAc::opmode_t::kFan;
     else if (mode == "自动") mode_ = stdAc::opmode_t::kAuto;
     else mode_ = stdAc::opmode_t::kCool;
 
-    if (swing_v == "最高") swing_v_ = stdAc::swingv_t::kHighest;
-    else if (swing_v == "偏高") swing_v_ = stdAc::swingv_t::kHigh;
-    else if (swing_v == "中间") swing_v_ = stdAc::swingv_t::kMiddle;
-    else if (swing_v == "偏低") swing_v_ = stdAc::swingv_t::kLow;
-    else if (swing_v == "最低") swing_v_ = stdAc::swingv_t::kLowest;
-    else if (swing_v == "中上") swing_v_ = stdAc::swingv_t::kUpperMiddle;
-    else if (swing_v == "自动") swing_v_ = stdAc::swingv_t::kAuto;
-    else swing_v_ = stdAc::swingv_t::kOff;
+    this->clear_power_off_state_();
 
     status_ = "已恢复已保存的设置";
     update_profile_();
@@ -310,6 +286,17 @@ class UniversalAc {
     timer_deadline_ms_ = 0;
   }
 
+  // Values in this group are one-shot/run-time controls, never retained
+  // across a power-off or device restart.
+  void clear_power_off_state_() {
+    swing_v_ = stdAc::swingv_t::kOff;
+    swing_h_ = stdAc::swingh_t::kOff;
+    turbo_ = false;
+    sleep_mode_ = false;
+    clean_ = false;
+    clear_timer_();
+  }
+
   void send_() {
     if (sending_suspended_) return;
     const auto type = strToDecodeType(protocol_.c_str());
@@ -326,47 +313,46 @@ class UniversalAc {
   }
 
   IRac ir_;
+  // Retained state: reconstructed from the EEPROM-backed ESPHome values.
   std::string protocol_;
   std::string brand_;
   std::string profile_;
-  std::string status_;
   int16_t model_{1};
   float temperature_{26};
-  int16_t sleep_{-1};
-  uint32_t timer_deadline_ms_{0};
-  bool sending_suspended_{false};
-  bool sleep_mode_{false};
-  bool power_{false};
-  bool quiet_{false};
-  bool turbo_{false};
-  bool econo_{false};
   bool light_{false};
-  bool filter_{false};
-  bool clean_{false};
-  bool beep_{false};
-  uint32_t send_sequence_{0};
   stdAc::opmode_t mode_{stdAc::opmode_t::kCool};
   stdAc::fanspeed_t fan_{stdAc::fanspeed_t::kAuto};
+
+  // Power-off-cleared runtime state.
+  int16_t sleep_{-1};
+  uint32_t timer_deadline_ms_{0};
+  bool sleep_mode_{false};
+  bool power_{false};
+  bool turbo_{false};
+  bool clean_{false};
   stdAc::swingv_t swing_v_{stdAc::swingv_t::kOff};
   stdAc::swingh_t swing_h_{stdAc::swingh_t::kOff};
+
+  // Other protocol flags and diagnostics.
+  std::string status_;
+  bool sending_suspended_{false};
+  bool quiet_{false};
+  bool econo_{false};
+  bool filter_{false};
+  bool beep_{false};
+  uint32_t send_sequence_{0};
 };
 
 static UniversalAc universal_ac;
 static void ac_begin() { universal_ac.begin(); }
 static bool ac_set_protocol(const std::string &value) { return universal_ac.set_protocol(value); }
 static void ac_set_power(bool value) { universal_ac.set_power(value); }
-static void ac_set_power_with_mode(bool value, const std::string &mode) {
-  universal_ac.set_power_with_mode(value, mode);
-}
-static void ac_set_mode(const std::string &value) { universal_ac.set_mode(value); }
-static void ac_set_temperature(float value) { universal_ac.set_temperature(value); }
 static void ac_set_fan(const std::string &value) { universal_ac.set_fan(value); }
 static void ac_set_swing_v(const std::string &value) { universal_ac.set_swing_v(value); }
 static void ac_set_feature(const std::string &feature, bool value) { universal_ac.set_feature(feature, value); }
 static void ac_set_sleep(float minutes) { universal_ac.set_sleep(minutes); }
 static void ac_set_special_mode(const std::string &value) { universal_ac.set_special_mode(value); }
 static void ac_restore(const std::string &protocol, float temperature, const std::string &mode,
-                       const std::string &fan, const std::string &swing_v, bool power,
-                       const std::string &special_mode, bool light, float sleep) {
-  universal_ac.restore(protocol, temperature, mode, fan, swing_v, power, special_mode, light, sleep);
+                       const std::string &fan, bool light) {
+  universal_ac.restore(protocol, temperature, mode, fan, light);
 }
