@@ -1,8 +1,9 @@
 #pragma once
 
 #include "esphome/components/climate/climate.h"
-#include "esphome/components/number/number.h"
+#include "esphome/components/globals/globals_component.h"
 #include "esphome/components/select/select.h"
+#include "esphome/components/script/script.h"
 #include "esphome/components/switch/switch.h"
 #include "esphome/core/component.h"
 #include "universal_ac.h"
@@ -11,13 +12,13 @@ namespace esphome::universal_ac_climate {
 
 class UniversalAcClimate : public climate::Climate, public PollingComponent {
  public:
-  void set_temperature_storage(number::Number *storage) { this->temperature_storage_ = storage; }
-  void set_mode_storage(select::Select *storage) { this->mode_storage_ = storage; }
+  void set_temperature_storage(globals::RestoringGlobalsComponent<float> *storage) {
+    this->temperature_storage_ = storage;
+  }
   void set_fan_storage(select::Select *storage) { this->fan_storage_ = storage; }
   void set_swing_storage(select::Select *storage) { this->swing_storage_ = storage; }
-  void set_special_storage(select::Select *storage) { this->special_storage_ = storage; }
   void set_power_storage(switch_::Switch *storage) { this->power_storage_ = storage; }
-  void set_timer_storage(number::Number *storage) { this->timer_storage_ = storage; }
+  void set_power_off_reset(script::Script<> *reset) { this->power_off_reset_ = reset; }
   void setup() override { this->sync_state_(); }
   void update() override { this->sync_state_(); }
 
@@ -50,7 +51,6 @@ class UniversalAcClimate : public climate::Climate, public PollingComponent {
     auto fan = universal_ac.fan();
     auto swing_v = universal_ac.swing_v();
     int16_t sleep = universal_ac.sleep();
-    const char *stored_mode = nullptr;
     const char *stored_swing = nullptr;
 
     if (call.get_mode().has_value()) {
@@ -61,27 +61,22 @@ class UniversalAcClimate : public climate::Climate, public PollingComponent {
         case climate::CLIMATE_MODE_AUTO:
           power = true;
           mode = stdAc::opmode_t::kAuto;
-          stored_mode = "自动";
           break;
         case climate::CLIMATE_MODE_COOL:
           power = true;
           mode = stdAc::opmode_t::kCool;
-          stored_mode = "制冷";
           break;
         case climate::CLIMATE_MODE_HEAT:
           power = true;
           mode = stdAc::opmode_t::kHeat;
-          stored_mode = "制热";
           break;
         case climate::CLIMATE_MODE_DRY:
           power = true;
           mode = stdAc::opmode_t::kDry;
-          stored_mode = "除湿";
           break;
         case climate::CLIMATE_MODE_FAN_ONLY:
           power = true;
           mode = stdAc::opmode_t::kFan;
-          stored_mode = "送风";
           break;
         default:
           break;
@@ -90,7 +85,7 @@ class UniversalAcClimate : public climate::Climate, public PollingComponent {
     if (call.get_target_temperature().has_value()) {
       temperature = *call.get_target_temperature();
       if (this->temperature_storage_ != nullptr)
-        this->temperature_storage_->make_call().set_value(temperature).perform();
+        this->temperature_storage_->value() = temperature;
     }
     if (call.get_fan_mode().has_value()) {
       const char *stored_fan = "自动";
@@ -126,8 +121,6 @@ class UniversalAcClimate : public climate::Climate, public PollingComponent {
           break;
       }
     }
-    if (stored_mode != nullptr && this->mode_storage_ != nullptr)
-      this->mode_storage_->make_call().set_option(stored_mode).perform();
     if (stored_swing != nullptr && this->swing_storage_ != nullptr)
       this->swing_storage_->make_call().set_option(stored_swing).perform();
     universal_ac.set_sending_suspended(false);
@@ -136,12 +129,8 @@ class UniversalAcClimate : public climate::Climate, public PollingComponent {
                                sleep, universal_ac.sleep_mode());
     if (this->power_storage_ != nullptr)
       this->power_storage_->publish_state(power);
-    if (!power && this->swing_storage_ != nullptr)
-      this->swing_storage_->make_call().set_index(0).perform();
-    if (!power && this->special_storage_ != nullptr)
-      this->special_storage_->make_call().set_index(0).perform();
-    if (!power && this->timer_storage_ != nullptr)
-      this->timer_storage_->publish_state(0);
+    if (!power && this->power_off_reset_ != nullptr)
+      this->power_off_reset_->execute();
     this->sync_state_();
   }
 
@@ -200,13 +189,11 @@ class UniversalAcClimate : public climate::Climate, public PollingComponent {
     }
   }
 
-  number::Number *temperature_storage_{nullptr};
-  select::Select *mode_storage_{nullptr};
+  globals::RestoringGlobalsComponent<float> *temperature_storage_{nullptr};
   select::Select *fan_storage_{nullptr};
   select::Select *swing_storage_{nullptr};
-  select::Select *special_storage_{nullptr};
   switch_::Switch *power_storage_{nullptr};
-  number::Number *timer_storage_{nullptr};
+  script::Script<> *power_off_reset_{nullptr};
 };
 
 }  // namespace esphome::universal_ac_climate
