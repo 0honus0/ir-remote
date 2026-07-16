@@ -4,6 +4,13 @@
 The generated catalog keeps every category and brand, orders codes by the
 database priority, and stores duplicate binary payloads only once. It is safe
 to rerun when either the SQLite index or the binary pack is updated.
+
+Example (from repo root):
+
+  python tools/export_irext_catalog.py data/irext/db/irext_db_20260519_sqlite3.db \
+      --binary-dir data/irext/bin \
+      --output-dir generated/irext \
+      --emit-header
 """
 
 from __future__ import annotations
@@ -167,7 +174,7 @@ def emit_catalog_index_header(
 
     binary_by_id = {binary["id"]: binary for binary in binaries}
     brands: list[tuple[int, str, str | None]] = []
-    entries: list[tuple[int, str, int, int]] = []
+    entries: list[tuple[int, str, int, int, int, int]] = []
     for type_index, category in enumerate(categories):
         for brand in category["brands"]:
             brand_index = len(brands)
@@ -176,7 +183,14 @@ def emit_catalog_index_header(
                 binary = binary_by_id.get(code["binary_id"])
                 if binary is not None:
                     entries.append(
-                        (brand_index, str(code["control_code"]), binary["offset"], binary["length"])
+                        (
+                            brand_index,
+                            str(code["control_code"]),
+                            binary["offset"],
+                            binary["length"],
+                            binary["category_id"],
+                            binary["subcategory"],
+                        )
                     )
 
     lines = [
@@ -189,7 +203,7 @@ def emit_catalog_index_header(
         "",
         "struct TypeEntry { const char *name; };",
         "struct BrandEntry { uint8_t type_index; const char *name; };",
-        "struct ControlCodeEntry { uint16_t brand_index; const char *code; uint32_t offset; uint16_t length; };",
+        "struct ControlCodeEntry { uint16_t brand_index; const char *code; uint32_t offset; uint16_t length; uint8_t category_id; uint8_t subcategory; };",
         "",
         "static const TypeEntry types[] PROGMEM = {",
     ]
@@ -200,8 +214,11 @@ def emit_catalog_index_header(
         label = brand_name_cn or brand_name
         lines.append(f'  {{{type_index}, "{cpp_string(label)}"}},')
     lines.extend(["};", "", "static const ControlCodeEntry control_codes[] PROGMEM = {"])
-    for brand_index, code, offset, length in entries:
-        lines.append(f'  {{{brand_index}, "{cpp_string(code)}", {offset}UL, {length}}},')
+    for brand_index, code, offset, length, category_id, subcategory in entries:
+        lines.append(
+            f'  {{{brand_index}, "{cpp_string(code)}", {offset}UL, {length}, '
+            f"{category_id}, {subcategory}}},"
+        )
     lines.extend(
         [
             "};",

@@ -1,6 +1,13 @@
-# Gitignore settings for ESPHome
-# This is an example and may include too much for your use-case.
-# You can modify this file to suit your needs.
+﻿# ESPHome
 /.esphome/
 /secrets.yaml
+**/__pycache__/
 *.pyc
+
+# Local editor / agent
+.agents/
+
+# Optional large IRext source assets (keep generated/ headers in git)
+# Uncomment if you do not want to track the raw pack:
+# /data/irext/bin/
+# /data/irext/db/
