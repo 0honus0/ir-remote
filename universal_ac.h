@@ -12,6 +12,7 @@ class UniversalAc {
     brand_ = "格力";
     protocol_ = "GREE";
     model_ = 1;
+    selection_ = "格力_GREE_YAW1F";
     status_ = "就绪";
     update_profile_();
   }
@@ -42,6 +43,7 @@ class UniversalAc {
     brand_ = brand;
     protocol_ = protocol_code;
     model_ = model;
+    selection_ = protocol;
     status_ = "已选择空调协议";
     update_profile_();
     return true;
@@ -161,39 +163,34 @@ class UniversalAc {
   }
   bool quiet() const { return quiet_; }
   bool turbo() const { return turbo_; }
+  bool clean() const { return clean_; }
+  bool light() const { return light_; }
   bool econo() const { return econo_; }
+  const std::string &selection() const { return selection_; }
   stdAc::opmode_t mode() const { return mode_; }
   stdAc::fanspeed_t fan() const { return fan_; }
   stdAc::swingv_t swing_v() const { return swing_v_; }
   stdAc::swingh_t swing_h() const { return swing_h_; }
 
-  void restore(const std::string &protocol, float temperature, const std::string &mode,
-               const std::string &fan, const std::string &swing_v, bool light) {
-    set_protocol(protocol);
+  bool restore(const std::string &protocol, float temperature, stdAc::opmode_t mode,
+               stdAc::fanspeed_t fan, stdAc::swingv_t swing_v, bool light, bool power) {
+    if (!set_protocol(protocol)) return false;
     temperature_ = temperature < 16 ? 16 : (temperature > 30 ? 30 : temperature);
-    power_ = false;
+    power_ = power;
     light_ = light;
     quiet_ = false;
     econo_ = false;
     filter_ = false;
     beep_ = false;
-    if (fan == "最小") fan_ = stdAc::fanspeed_t::kMin;
-    else if (fan == "低") fan_ = stdAc::fanspeed_t::kLow;
-    else if (fan == "中") fan_ = stdAc::fanspeed_t::kMedium;
-    else if (fan == "高") fan_ = stdAc::fanspeed_t::kHigh;
-    else if (fan == "最大") fan_ = stdAc::fanspeed_t::kMax;
-    else fan_ = stdAc::fanspeed_t::kAuto;
-    if (mode == "制热") mode_ = stdAc::opmode_t::kHeat;
-    else if (mode == "除湿") mode_ = stdAc::opmode_t::kDry;
-    else if (mode == "送风") mode_ = stdAc::opmode_t::kFan;
-    else if (mode == "自动") mode_ = stdAc::opmode_t::kAuto;
-    else mode_ = stdAc::opmode_t::kCool;
+    fan_ = fan;
+    mode_ = mode;
 
-    this->clear_power_off_state_();
-    set_swing_v(swing_v);
+    if (!power_) this->clear_power_off_state_();
+    swing_v_ = swing_v;
 
     status_ = "已恢复已保存的设置";
     update_profile_();
+    return true;
   }
 
   const std::string &status() const { return status_; }
@@ -313,9 +310,10 @@ class UniversalAc {
   }
 
   IRac ir_;
-  // Retained state: reconstructed from the EEPROM-backed ESPHome values.
+  // Retained state is reconstructed by the storage-agnostic state manager.
   std::string protocol_;
   std::string brand_;
+  std::string selection_;
   std::string profile_;
   int16_t model_{1};
   float temperature_{26};
@@ -342,16 +340,3 @@ class UniversalAc {
   bool beep_{false};
   uint32_t send_sequence_{0};
 };
-
-static UniversalAc universal_ac;
-static void ac_begin() { universal_ac.begin(); }
-static bool ac_set_protocol(const std::string &value) { return universal_ac.set_protocol(value); }
-static void ac_set_fan(const std::string &value) { universal_ac.set_fan(value); }
-static void ac_set_swing_v(const std::string &value) { universal_ac.set_swing_v(value); }
-static void ac_set_feature(const std::string &feature, bool value) { universal_ac.set_feature(feature, value); }
-static void ac_set_sleep(float minutes) { universal_ac.set_sleep(minutes); }
-static void ac_set_special_mode(const std::string &value) { universal_ac.set_special_mode(value); }
-static void ac_restore(const std::string &protocol, float temperature, const std::string &mode,
-                       const std::string &fan, const std::string &swing_v, bool light) {
-  universal_ac.restore(protocol, temperature, mode, fan, swing_v, light);
-}

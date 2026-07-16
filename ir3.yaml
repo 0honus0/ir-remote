@@ -3,6 +3,7 @@
   name_add_mac_suffix: true
   includes:
     - universal_ac.h
+    - ac_state_manager.h
   platformio_options:
     lib_deps:
       - https://github.com/crankyoldgit/IRremoteESP8266.git#v2.9.0
@@ -12,7 +13,6 @@
         - output.turn_off: led_red
         - output.turn_off: led_yellow
         - output.turn_off: led_blue
-        - lambda: 'ac_begin();'
         - if:
             condition:
               wifi.connected:
@@ -22,13 +22,6 @@
               - script.execute: led_wifi_missing_blink
     - priority: -100
       then:
-        - lambda: |-
-            id(ac_protocol).publish_state(id(ac_protocol_saved));
-            ac_restore(id(ac_protocol_saved), id(ac_saved_temperature),
-                       id(ac_saved_mode),
-                       std::string(id(ac_fan).current_option().c_str()),
-                       std::string(id(ac_swing_v).current_option().c_str()),
-                       id(ac_display_light).state);
         - component.update: firmware_version
 
 esp8266:
@@ -38,7 +31,7 @@ external_components:
   - source:
       type: local
       path: components
-    components: [universal_ac_climate]
+    components: [universal_ac_controller, universal_ac_climate]
 
 wifi:
   ssid: "honus_2.4G"
@@ -115,20 +108,6 @@ globals:
     restore_value: no
     initial_value: '"使用配置文件中的 WiFi"'
 
-  # 空调关机后保留，并写入 EEPROM 供重启恢复。
-  - id: ac_protocol_saved
-    type: std::string
-    restore_value: yes
-    initial_value: '"格力_GREE_YAW1F"'
-  - id: ac_saved_mode
-    type: std::string
-    restore_value: yes
-    initial_value: '"制冷"'
-  - id: ac_saved_temperature
-    type: float
-    restore_value: yes
-    initial_value: '26.0'
-
 # LED 定义。所有 LED 默认关闭，按运行事件短暂提示。
 output:
   - platform: gpio
@@ -150,16 +129,6 @@ output:
     id: led_blue
 
 script:
-  # 关机清除的数据：本机定时和特殊模式。送风方向保持不变。
-  # UniversalAc 同步清除红外编码状态；本脚本仅同步 ESPHome 实体状态。
-  - id: ac_clear_power_off_state
-    mode: single
-    then:
-      - lambda: 'id(ac_sleep).publish_state(0);'
-      - select.set_index:
-          id: ac_special_mode
-          index: 0
-
   - id: led_action_flash
     mode: restart
     then:
@@ -217,7 +186,7 @@ interval:
     then:
       - if:
           condition:
-            lambda: 'return universal_ac.timer_expired();'
+            lambda: 'return id(ac_controller).timer_expired();'
           then:
             - lambda: 'ESP_LOGI("ac_timer", "Shutdown timer expired; turning AC off.");'
             - climate.control:
@@ -229,7 +198,7 @@ sensor:
     id: ir_send_event
     internal: true
     update_interval: 100ms
-    lambda: 'return static_cast<float>(universal_ac.send_sequence());'
+    lambda: 'return static_cast<float>(id(ac_controller).send_sequence());'
     on_value:
       - lambda: |-
           static uint32_t previous = 0;
@@ -249,8 +218,8 @@ text_sensor:
 
   - platform: template
     name: "红外状态 [ir_status]"
-    lambda: 'return universal_ac.status();'
-    update_interval: 1s
+    id: ir_status
+    update_interval: never
 
   - platform: template
     name: "固件版本 [firmware_version]"
@@ -259,36 +228,22 @@ text_sensor:
     lambda: 'return std::string(__DATE__);'
     update_interval: never
 
+universal_ac_controller:
+  id: ac_controller
+  protocol_control: ac_protocol
+  fan_control: ac_fan
+  swing_control: ac_swing_v
+  special_control: ac_special_mode
+  timer_control: ac_sleep
+  light_control: ac_display_light
+  power_control: ac_power_toggle
+  status_control: ir_status
+
 climate:
   - platform: universal_ac_climate
     name: "空调遥控 [ac_climate]"
     id: ha_universal_ac
-    temperature_storage: ac_saved_temperature
-    fan_storage: ac_fan
-    swing_storage: ac_swing_v
-    power_off_reset: ac_clear_power_off_state
-    update_interval: 1s
-    on_state:
-      - lambda: |-
-          switch (id(ha_universal_ac).mode) {
-            case climate::CLIMATE_MODE_AUTO:
-              id(ac_saved_mode) = "自动";
-              break;
-            case climate::CLIMATE_MODE_COOL:
-              id(ac_saved_mode) = "制冷";
-              break;
-            case climate::CLIMATE_MODE_HEAT:
-              id(ac_saved_mode) = "制热";
-              break;
-            case climate::CLIMATE_MODE_DRY:
-              id(ac_saved_mode) = "除湿";
-              break;
-            case climate::CLIMATE_MODE_FAN_ONLY:
-              id(ac_saved_mode) = "送风";
-              break;
-            default:
-              break;
-          }
+    controller: ac_controller
 
 select:
   # 关机后保留且写入 EEPROM 的空调设定。
@@ -296,6 +251,7 @@ select:
     name: "空调协议 [ac_protocol]"
     id: ac_protocol
     optimistic: true
+    restore_value: false
     web_server:
       sorting_group_id: ac_protocol_group
       sorting_weight: 10
@@ -408,11 +364,7 @@ select:
       - "约克_YORK_自动"
     set_action:
       - lambda: |-
-          if (ac_set_protocol(x)) {
-            id(ac_protocol_saved) = x;
-          } else {
-            id(ac_protocol).publish_state(id(ac_protocol_saved));
-          }
+          id(ac_controller).set_protocol(x);
       - script.execute: led_action_flash
 
   - platform: template
@@ -422,11 +374,12 @@ select:
       sorting_group_id: ac_control_group
       sorting_weight: 10
     optimistic: true
-    restore_value: true
+    restore_value: false
     initial_option: "自动"
     options: ["自动", "最小", "低", "中", "高", "最大"]
     set_action:
-      - lambda: 'ac_set_fan(x);'
+      - lambda: |-
+          id(ac_controller).set_fan(x);
 
   # 关机清除的数据，不写入 EEPROM。
   - platform: template
@@ -437,18 +390,20 @@ select:
     initial_option: "正常"
     options: ["正常", "强力", "睡眠", "干燥"]
     set_action:
-      - lambda: 'ac_set_special_mode(x);'
+      - lambda: |-
+          id(ac_controller).set_special_mode(x);
       - script.execute: led_action_flash
 
   - platform: template
     name: "送风方向 [ac_swing]"
     id: ac_swing_v
     optimistic: true
-    restore_value: true
+    restore_value: false
     initial_option: "关闭"
     options: ["关闭", "自动", "最高", "偏高", "中上", "中间", "偏低", "最低"]
     set_action:
-      - lambda: 'ac_set_swing_v(x);'
+      - lambda: |-
+          id(ac_controller).set_swing(x);
       - script.execute: led_action_flash
 
 number:
@@ -465,7 +420,7 @@ number:
     mode: box
     set_action:
       - lambda: |-
-          ac_set_sleep(x);
+          id(ac_controller).set_timer(x);
           if (x > 0) {
             ESP_LOGI("ac_timer", "Shutdown timer set for %.0f minutes.", x);
           } else {
@@ -474,14 +429,27 @@ number:
       - script.execute: led_action_flash
 
 switch:
+  - platform: template
+    name: "空调开关 [ac_power]"
+    id: ac_power_toggle
+    icon: "mdi:air-conditioner"
+    optimistic: true
+    restore_mode: DISABLED
+    turn_on_action:
+      - lambda: 'id(ac_controller).set_power(true);'
+      - script.execute: led_action_flash
+    turn_off_action:
+      - lambda: 'id(ac_controller).set_power(false);'
+      - script.execute: led_action_flash
+
   # 关机后保留且写入 EEPROM 的空调设定。
   - platform: template
     name: "面板灯开关 [ac_light]"
     id: ac_display_light
     optimistic: true
-    restore_mode: RESTORE_DEFAULT_ON
-    turn_on_action: [lambda: 'ac_set_feature("light", true);', script.execute: led_action_flash]
-    turn_off_action: [lambda: 'ac_set_feature("light", false);', script.execute: led_action_flash]
+    restore_mode: DISABLED
+    turn_on_action: [lambda: 'id(ac_controller).set_light(true);', script.execute: led_action_flash]
+    turn_off_action: [lambda: 'id(ac_controller).set_light(false);', script.execute: led_action_flash]
 
 text:
   - platform: template
