@@ -1,4 +1,4 @@
-# 4 MB ESP-12E: roughly 1.98 MiB for the running firmware and the OTA image.
+# 4 MB ESP-12E: roughly 1.96 MiB for the running firmware and the OTA image.
 # Flash this configuration once over serial before using OTA.
 packages:
   base: !include ir3.yaml
