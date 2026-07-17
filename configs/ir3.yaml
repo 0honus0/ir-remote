@@ -1,7 +1,9 @@
 esphome:
   name: ir-remote
+  name_add_mac_suffix: true
   includes:
     - ../components/universal_ac_climate/universal_ac.h
+    - ac_state_manager.h
   platformio_options:
     lib_deps:
       - https://github.com/crankyoldgit/IRremoteESP8266.git#v2.9.0
@@ -11,7 +13,6 @@ esphome:
         - output.turn_off: led_red
         - output.turn_off: led_yellow
         - output.turn_off: led_blue
-        - lambda: 'ac_begin();'
         - if:
             condition:
               wifi.connected:
@@ -21,12 +22,7 @@ esphome:
               - script.execute: led_wifi_missing_blink
     - priority: -100
       then:
-        - lambda: |-
-            id(ac_protocol).publish_state(id(ac_protocol_saved));
-            ac_restore(id(ac_protocol_saved), id(ac_saved_temperature),
-                       id(ac_saved_mode),
-                       std::string(id(ac_fan).current_option().c_str()),
-                       id(ac_display_light).state);
+        - component.update: firmware_version
 
 esp8266:
   board: esp12e
@@ -35,12 +31,12 @@ external_components:
   - source:
       type: local
       path: ../components
-    components: [universal_ac_climate]
+    components: [universal_ac_controller, universal_ac_climate]
 
 wifi:
   ssid: "honus_2.4G"
   password: "honushonus"
-  ap:  # ÍòÒ»Á¬²»ÉÏWiFi£¬¿ª¸öÈÈµã·½±ã¾È×©
+  ap:  # ï¿½ï¿½Ò»ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½WiFiï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Èµã·½ï¿½ï¿½ï¿½×©
     ssid: "honus-fallback"
     password: "12345678"
     # The fallback AP only starts after station association fails. Keep this
@@ -48,7 +44,7 @@ wifi:
     ap_timeout: 15s
   on_connect:
     then:
-      - lambda: 'id(wifi_status) = "ÒÑÁ¬½Ó";'
+      - lambda: 'id(wifi_status) = "ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½";'
       - component.update: current_wifi_ssid
       - script.stop: led_wifi_missing_blink
       - script.stop: led_error_flash
@@ -57,14 +53,14 @@ wifi:
       - script.execute: led_wifi_flash
   on_disconnect:
     then:
-      - lambda: 'id(wifi_status) = "Á¬½ÓÒÑ¶Ï¿ª";'
+      - lambda: 'id(wifi_status) = "ï¿½ï¿½ï¿½ï¿½ï¿½Ñ¶Ï¿ï¿½";'
       - script.execute: led_error_flash
       - script.execute: led_wifi_missing_blink
 
 captive_portal:
 
 logger:
-  baud_rate: 74880  # ¹Ø¼ü£¡·Ç±ê×¼²¨ÌØÂÊ
+  baud_rate: 74880  # ï¿½Ø¼ï¿½ï¿½ï¿½ï¿½Ç±ï¿½×¼ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 
 api:
 
@@ -74,16 +70,19 @@ web_server:
   include_internal: false
   sorting_groups:
     - id: ac_protocol_group
-      name: "¿Õµ÷Ğ­Òé"
+      name: "ï¿½Õµï¿½Ğ­ï¿½ï¿½"
       sorting_weight: 10
+    - id: ac_control_group
+      name: "ç©ºè°ƒæ§åˆ¶"
+      sorting_weight: 20
     - id: wifi_settings_group
-      name: "WiFi ÉèÖÃ"
+      name: "WiFi ï¿½ï¿½ï¿½ï¿½"
       sorting_weight: 90
   
 ota:
   - platform: esphome
 
-# ºìÍâ½ÓÊÕ±£ÁôÓÃÓÚÈÕÖ¾Õï¶Ï¡£
+# ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Õ±ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ö¾ï¿½ï¿½Ï¡ï¿½
 remote_receiver:
   id: remote_rx
   pin:
@@ -94,7 +93,7 @@ remote_receiver:
     then:
       - script.execute: led_ir_receive_flash
 
-# Ò×Ê§ÔËĞĞ×´Ì¬£¬²»Ğ´Èë EEPROM¡£
+# ï¿½ï¿½Ê§ï¿½ï¿½ï¿½ï¿½×´Ì¬ï¿½ï¿½ï¿½ï¿½Ğ´ï¿½ï¿½ EEPROMï¿½ï¿½
 globals:
   - id: wifi_ssid_pending
     type: std::string
@@ -107,35 +106,21 @@ globals:
   - id: wifi_status
     type: std::string
     restore_value: no
-    initial_value: '"Ê¹ÓÃÅäÖÃÎÄ¼şÖĞµÄ WiFi"'
+    initial_value: '"Ê¹ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ä¼ï¿½ï¿½Ğµï¿½ WiFi"'
 
-  # ¿Õµ÷¹Ø»úºó±£Áô£¬²¢Ğ´Èë EEPROM ¹©ÖØÆô»Ö¸´¡£
-  - id: ac_protocol_saved
-    type: std::string
-    restore_value: yes
-    initial_value: '"¸ñÁ¦_GREE_YAW1F"'
-  - id: ac_saved_mode
-    type: std::string
-    restore_value: yes
-    initial_value: '"ÖÆÀä"'
-  - id: ac_saved_temperature
-    type: float
-    restore_value: yes
-    initial_value: '26.0'
-
-# LED ¶¨Òå¡£ËùÓĞ LED Ä¬ÈÏ¹Ø±Õ£¬°´ÔËĞĞÊÂ¼ş¶ÌÔİÌáÊ¾¡£
+# LED å®šä¹‰ã€‚æ‰€æœ‰ LED é»˜è®¤å…³é—­ï¼ŒæŒ‰è¿è¡Œäº‹ä»¶çŸ­æš‚æç¤ºã€‚
 output:
   - platform: gpio
     pin:
       number: GPIO12
       inverted: true
-    id: led_red        # ºìÉ« ¡ú GPIO12
+    id: led_red        # ï¿½ï¿½É« ï¿½ï¿½ GPIO12
 
   - platform: gpio
     pin:
       number: GPIO13
       inverted: true
-    id: led_yellow     # »ÆÉ« ¡ú GPIO13
+    id: led_yellow     # ï¿½ï¿½É« ï¿½ï¿½ GPIO13
 
   - platform: gpio
     pin:
@@ -144,19 +129,6 @@ output:
     id: led_blue
 
 script:
-  # ¹Ø»úÇå³ıµÄÊı¾İ£º±¾»ú¶¨Ê±¡¢´¹Ö±·çÏò¡¢ÌØÊâÄ£Ê½¡£
-  # UniversalAc Í¬²½Çå³ıºìÍâ±àÂë×´Ì¬£»±¾½Å±¾½öÍ¬²½ ESPHome ÊµÌå×´Ì¬¡£
-  - id: ac_clear_power_off_state
-    mode: single
-    then:
-      - lambda: 'id(ac_sleep).publish_state(0);'
-      - select.set_index:
-          id: ac_swing_v
-          index: 0
-      - select.set_index:
-          id: ac_special_mode
-          index: 0
-
   - id: led_action_flash
     mode: restart
     then:
@@ -214,17 +186,19 @@ interval:
     then:
       - if:
           condition:
-            lambda: 'return universal_ac.timer_expired();'
+            lambda: 'return id(ac_controller).timer_expired();'
           then:
             - lambda: 'ESP_LOGI("ac_timer", "Shutdown timer expired; turning AC off.");'
-            - switch.turn_off: ac_power
+            - climate.control:
+                id: ha_universal_ac
+                mode: "OFF"
 
 sensor:
   - platform: template
     id: ir_send_event
     internal: true
     update_interval: 100ms
-    lambda: 'return static_cast<float>(universal_ac.send_sequence());'
+    lambda: 'return static_cast<float>(id(ac_controller).send_sequence());'
     on_value:
       - lambda: |-
           static uint32_t previous = 0;
@@ -234,214 +208,208 @@ sensor:
 
 text_sensor:
   - platform: template
-    name: "µ±Ç° WiFi Ãû³Æ [wifi_current]"
+    name: "ï¿½ï¿½Ç° WiFi ï¿½ï¿½ï¿½ï¿½ [wifi_current]"
     id: current_wifi_ssid
     lambda: |-
-      if (!wifi::global_wifi_component->is_connected()) return {"Î´Á¬½Ó"};
+      if (!wifi::global_wifi_component->is_connected()) return {"Î´ï¿½ï¿½ï¿½ï¿½"};
       std::array<char, wifi::SSID_BUFFER_SIZE> ssid{};
       return std::string(wifi::global_wifi_component->wifi_ssid_to(ssid));
     update_interval: never
 
   - platform: template
-    name: "ºìÍâ×´Ì¬ [ir_status]"
-    lambda: 'return universal_ac.status();'
-    update_interval: 1s
+    name: "çº¢å¤–çŠ¶æ€ [ir_status]"
+    id: ir_status
+    update_interval: never
+
+  - platform: template
+    name: "å›ºä»¶ç‰ˆæœ¬ [firmware_version]"
+    id: firmware_version
+    icon: "mdi:calendar"
+    lambda: 'return std::string(__DATE__);'
+    update_interval: never
+
+universal_ac_controller:
+  id: ac_controller
+  protocol_control: ac_protocol
+  fan_control: ac_fan
+  swing_control: ac_swing_v
+  special_control: ac_special_mode
+  timer_control: ac_sleep
+  light_control: ac_display_light
+  power_control: ac_power_toggle
+  status_control: ir_status
 
 climate:
   - platform: universal_ac_climate
-    name: "¿Õµ÷Ò£¿Ø [ac_climate]"
+    name: "ï¿½Õµï¿½Ò£ï¿½ï¿½ [ac_climate]"
     id: ha_universal_ac
-    temperature_storage: ac_saved_temperature
-    fan_storage: ac_fan
-    swing_storage: ac_swing_v
-    power_storage: ac_power
-    power_off_reset: ac_clear_power_off_state
-    update_interval: 1s
-    on_state:
-      - lambda: |-
-          switch (id(ha_universal_ac).mode) {
-            case climate::CLIMATE_MODE_AUTO:
-              id(ac_saved_mode) = "×Ô¶¯";
-              break;
-            case climate::CLIMATE_MODE_COOL:
-              id(ac_saved_mode) = "ÖÆÀä";
-              break;
-            case climate::CLIMATE_MODE_HEAT:
-              id(ac_saved_mode) = "ÖÆÈÈ";
-              break;
-            case climate::CLIMATE_MODE_DRY:
-              id(ac_saved_mode) = "³ıÊª";
-              break;
-            case climate::CLIMATE_MODE_FAN_ONLY:
-              id(ac_saved_mode) = "ËÍ·ç";
-              break;
-            default:
-              break;
-          }
+    controller: ac_controller
 
 select:
-  # ¹Ø»úºó±£ÁôÇÒĞ´Èë EEPROM µÄ¿Õµ÷Éè¶¨¡£
+  # ï¿½Ø»ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ğ´ï¿½ï¿½ EEPROM ï¿½Ä¿Õµï¿½ï¿½è¶¨ï¿½ï¿½
   - platform: template
-    name: "¿Õµ÷Ğ­Òé [ac_protocol]"
+    name: "ï¿½Õµï¿½Ğ­ï¿½ï¿½ [ac_protocol]"
     id: ac_protocol
     optimistic: true
+    restore_value: false
     web_server:
       sorting_group_id: ac_protocol_group
       sorting_weight: 10
-    initial_option: "¸ñÁ¦_GREE_YAW1F"
+    initial_option: "ï¿½ï¿½ï¿½ï¿½_GREE_YAW1F"
     options:
-      - "¸ñÁ¦_GREE_×Ô¶¯"
-      - "¸ñÁ¦_GREE_YAW1F"
-      - "¸ñÁ¦_GREE_YBOFB"
-      - "¸ñÁ¦_GREE_YX1FSF"
-      - "ÃÀµÄ_MIDEA_×Ô¶¯"
-      - "º£¶û_HAIER_AC_×Ô¶¯"
-      - "º£¶û_HAIER_AC160_×Ô¶¯"
-      - "º£¶û_HAIER_AC176_×Ô¶¯"
-      - "º£¶û_HAIER_AC176_V9014557-A"
-      - "º£¶û_HAIER_AC176_V9014557-B"
-      - "º£¶û_HAIER_AC_YRW02_×Ô¶¯"
-      - "TCL_TCL112AC_×Ô¶¯"
+      - "ï¿½ï¿½ï¿½ï¿½_GREE_ï¿½Ô¶ï¿½"
+      - "ï¿½ï¿½ï¿½ï¿½_GREE_YAW1F"
+      - "ï¿½ï¿½ï¿½ï¿½_GREE_YBOFB"
+      - "ï¿½ï¿½ï¿½ï¿½_GREE_YX1FSF"
+      - "ï¿½ï¿½ï¿½ï¿½_MIDEA_ï¿½Ô¶ï¿½"
+      - "ï¿½ï¿½ï¿½ï¿½_HAIER_AC_ï¿½Ô¶ï¿½"
+      - "ï¿½ï¿½ï¿½ï¿½_HAIER_AC160_ï¿½Ô¶ï¿½"
+      - "ï¿½ï¿½ï¿½ï¿½_HAIER_AC176_ï¿½Ô¶ï¿½"
+      - "ï¿½ï¿½ï¿½ï¿½_HAIER_AC176_V9014557-A"
+      - "ï¿½ï¿½ï¿½ï¿½_HAIER_AC176_V9014557-B"
+      - "ï¿½ï¿½ï¿½ï¿½_HAIER_AC_YRW02_ï¿½Ô¶ï¿½"
+      - "TCL_TCL112AC_ï¿½Ô¶ï¿½"
       - "TCL_TCL112AC_TAC09CHSD"
       - "TCL_TCL112AC_GZ055BE1"
-      - "¿ÆÁú_KELON_×Ô¶¯"
-      - "¿­¶ûÎÄ_KELVINATOR_×Ô¶¯"
-      - "¿áÀ³Ë¹_COOLIX_×Ô¶¯"
-      - "´ó½ğ_DAIKIN_×Ô¶¯"
-      - "´ó½ğ_DAIKIN2_×Ô¶¯"
-      - "´ó½ğ_DAIKIN64_×Ô¶¯"
-      - "´ó½ğ_DAIKIN128_×Ô¶¯"
-      - "´ó½ğ_DAIKIN152_×Ô¶¯"
-      - "´ó½ğ_DAIKIN160_×Ô¶¯"
-      - "´ó½ğ_DAIKIN176_×Ô¶¯"
-      - "´ó½ğ_DAIKIN216_×Ô¶¯"
-      - "¸»Ê¿Í¨_FUJITSU_AC_×Ô¶¯"
-      - "¸»Ê¿Í¨_FUJITSU_AC_ARRAH2E"
-      - "¸»Ê¿Í¨_FUJITSU_AC_ARDB1"
-      - "¸»Ê¿Í¨_FUJITSU_AC_ARREB1E"
-      - "¸»Ê¿Í¨_FUJITSU_AC_ARJW2"
-      - "¸»Ê¿Í¨_FUJITSU_AC_ARRY4"
-      - "¸»Ê¿Í¨_FUJITSU_AC_ARREW4E"
-      - "ÈÕÁ¢_HITACHI_AC_×Ô¶¯"
-      - "ÈÕÁ¢_HITACHI_AC1_×Ô¶¯"
-      - "ÈÕÁ¢_HITACHI_AC1_R-LT0541-HTA-A"
-      - "ÈÕÁ¢_HITACHI_AC1_R-LT0541-HTA-B"
-      - "ÈÕÁ¢_HITACHI_AC264_×Ô¶¯"
-      - "ÈÕÁ¢_HITACHI_AC296_×Ô¶¯"
-      - "ÈÕÁ¢_HITACHI_AC344_×Ô¶¯"
-      - "ÈÕÁ¢_HITACHI_AC424_×Ô¶¯"
-      - "LG_LG_×Ô¶¯"
+      - "ï¿½ï¿½ï¿½ï¿½_KELON_ï¿½Ô¶ï¿½"
+      - "ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½_KELVINATOR_ï¿½Ô¶ï¿½"
+      - "ï¿½ï¿½ï¿½ï¿½Ë¹_COOLIX_ï¿½Ô¶ï¿½"
+      - "ï¿½ï¿½ï¿½_DAIKIN_ï¿½Ô¶ï¿½"
+      - "ï¿½ï¿½ï¿½_DAIKIN2_ï¿½Ô¶ï¿½"
+      - "ï¿½ï¿½ï¿½_DAIKIN64_ï¿½Ô¶ï¿½"
+      - "ï¿½ï¿½ï¿½_DAIKIN128_ï¿½Ô¶ï¿½"
+      - "ï¿½ï¿½ï¿½_DAIKIN152_ï¿½Ô¶ï¿½"
+      - "ï¿½ï¿½ï¿½_DAIKIN160_ï¿½Ô¶ï¿½"
+      - "ï¿½ï¿½ï¿½_DAIKIN176_ï¿½Ô¶ï¿½"
+      - "ï¿½ï¿½ï¿½_DAIKIN216_ï¿½Ô¶ï¿½"
+      - "ï¿½ï¿½Ê¿Í¨_FUJITSU_AC_ï¿½Ô¶ï¿½"
+      - "ï¿½ï¿½Ê¿Í¨_FUJITSU_AC_ARRAH2E"
+      - "ï¿½ï¿½Ê¿Í¨_FUJITSU_AC_ARDB1"
+      - "ï¿½ï¿½Ê¿Í¨_FUJITSU_AC_ARREB1E"
+      - "ï¿½ï¿½Ê¿Í¨_FUJITSU_AC_ARJW2"
+      - "ï¿½ï¿½Ê¿Í¨_FUJITSU_AC_ARRY4"
+      - "ï¿½ï¿½Ê¿Í¨_FUJITSU_AC_ARREW4E"
+      - "ï¿½ï¿½ï¿½ï¿½_HITACHI_AC_ï¿½Ô¶ï¿½"
+      - "ï¿½ï¿½ï¿½ï¿½_HITACHI_AC1_ï¿½Ô¶ï¿½"
+      - "ï¿½ï¿½ï¿½ï¿½_HITACHI_AC1_R-LT0541-HTA-A"
+      - "ï¿½ï¿½ï¿½ï¿½_HITACHI_AC1_R-LT0541-HTA-B"
+      - "ï¿½ï¿½ï¿½ï¿½_HITACHI_AC264_ï¿½Ô¶ï¿½"
+      - "ï¿½ï¿½ï¿½ï¿½_HITACHI_AC296_ï¿½Ô¶ï¿½"
+      - "ï¿½ï¿½ï¿½ï¿½_HITACHI_AC344_ï¿½Ô¶ï¿½"
+      - "ï¿½ï¿½ï¿½ï¿½_HITACHI_AC424_ï¿½Ô¶ï¿½"
+      - "LG_LG_ï¿½Ô¶ï¿½"
       - "LG_LG_GE6711AR2853M"
       - "LG_LG_AKB75215403"
       - "LG_LG_AKB74955603"
       - "LG_LG_AKB73757604"
       - "LG_LG_LG6711A20083V"
-      - "LG_LG2_×Ô¶¯"
+      - "LG_LG2_ï¿½Ô¶ï¿½"
       - "LG_LG2_GE6711AR2853M"
       - "LG_LG2_AKB75215403"
       - "LG_LG2_AKB74955603"
       - "LG_LG2_AKB73757604"
       - "LG_LG2_LG6711A20083V"
-      - "ÈıÁâµç»ú_MITSUBISHI_AC_×Ô¶¯"
-      - "ÈıÁâµç»ú_MITSUBISHI112_×Ô¶¯"
-      - "ÈıÁâµç»ú_MITSUBISHI136_×Ô¶¯"
-      - "ÈıÁâÖØ¹¤_MITSUBISHI_HEAVY_88_×Ô¶¯"
-      - "ÈıÁâÖØ¹¤_MITSUBISHI_HEAVY_152_×Ô¶¯"
-      - "ËÉÏÂ_PANASONIC_AC_×Ô¶¯"
-      - "ËÉÏÂ_PANASONIC_AC_LKE"
-      - "ËÉÏÂ_PANASONIC_AC_NKE"
-      - "ËÉÏÂ_PANASONIC_AC_DKE"
-      - "ËÉÏÂ_PANASONIC_AC_JKE"
-      - "ËÉÏÂ_PANASONIC_AC_CKP"
-      - "ËÉÏÂ_PANASONIC_AC_RKR"
-      - "ËÉÏÂ_PANASONIC_AC32_×Ô¶¯"
-      - "ÈıĞÇ_SAMSUNG_AC_×Ô¶¯"
-      - "ÏÄÆÕ_SHARP_AC_×Ô¶¯"
-      - "ÏÄÆÕ_SHARP_AC_A907"
-      - "ÏÄÆÕ_SHARP_AC_A705"
-      - "ÏÄÆÕ_SHARP_AC_A903"
-      - "¶«Ö¥_TOSHIBA_AC_×Ô¶¯"
-      - "»İ¶øÆÖ_WHIRLPOOL_AC_×Ô¶¯"
-      - "»İ¶øÆÖ_WHIRLPOOL_AC_DG11J13A"
-      - "»İ¶øÆÖ_WHIRLPOOL_AC_DG11J191"
-      - "°¢¶û¸ê_ARGO_×Ô¶¯"
-      - "°¢¶û¸ê_ARGO_SAC-WREM2"
-      - "°¢¶û¸ê_ARGO_SAC-WREM3"
-      - "°¬¶û¶Ù_AIRTON_×Ô¶¯"
-      - "°®¶ûÍş_AIRWELL_×Ô¶¯"
-      - "°²¿É_AMCOR_×Ô¶¯"
-      - "²©ÊÀ_BOSCH144_×Ô¶¯"
-      - "¿ªÀû_CARRIER_AC64_×Ô¶¯"
-      - "¿ÆÂŞÄÈ_CORONA_AC_×Ô¶¯"
-      - "µÂÁú_DELONGHI_AC_×Ô¶¯"
-      - "ÒÁ¿ÉÁÖ_ECOCLIM_×Ô¶¯"
-      - "ÒÁÀ³¿ËÌØÀ­_ELECTRA_AC_×Ô¶¯"
-      - "ºÃÌìÆø_GOODWEATHER_×Ô¶¯"
-      - "Ã×À­Ææ_MIRAGE_×Ô¶¯"
-      - "Ã×À­Ææ_MIRAGE_KKG9AC1"
-      - "Ã×À­Ææ_MIRAGE_KKG29AC1"
-      - "ĞÂÆøºò_NEOCLIMA_×Ô¶¯"
-      - "ÈğË¹_RHOSS_×Ô¶¯"
-      - "ÈıÑó_SANYO_AC_×Ô¶¯"
-      - "ÈıÑó_SANYO_AC88_×Ô¶¯"
-      - "Ì©¿ËÄá±´¶û_TECHNIBEL_AC_×Ô¶¯"
-      - "Ì©¿Æ_TECO_×Ô¶¯"
-      - "Ì©¿ËÅµµã_TEKNOPOINT_×Ô¶¯"
-      - "ÌØÀ¼Ë¹¿Æ_TRANSCOLD_×Ô¶¯"
-      - "ÌØÂåÌ©¿Ë_TROTEC_×Ô¶¯"
-      - "ÌØÂåÌ©¿Ë_TROTEC_3550_×Ô¶¯"
-      - "ÌØÂ³Âê_TRUMA_×Ô¶¯"
-      - "Î¬Ë¹ÌØ_VESTEL_AC_×Ô¶¯"
-      - "ÎÖ¶ûËşË¹_VOLTAS_×Ô¶¯"
-      - "ÎÖ¶ûËşË¹_VOLTAS_122LZF"
-      - "Ô¼¿Ë_YORK_×Ô¶¯"
+      - "ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½_MITSUBISHI_AC_ï¿½Ô¶ï¿½"
+      - "ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½_MITSUBISHI112_ï¿½Ô¶ï¿½"
+      - "ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½_MITSUBISHI136_ï¿½Ô¶ï¿½"
+      - "ï¿½ï¿½ï¿½ï¿½ï¿½Ø¹ï¿½_MITSUBISHI_HEAVY_88_ï¿½Ô¶ï¿½"
+      - "ï¿½ï¿½ï¿½ï¿½ï¿½Ø¹ï¿½_MITSUBISHI_HEAVY_152_ï¿½Ô¶ï¿½"
+      - "ï¿½ï¿½ï¿½ï¿½_PANASONIC_AC_ï¿½Ô¶ï¿½"
+      - "ï¿½ï¿½ï¿½ï¿½_PANASONIC_AC_LKE"
+      - "ï¿½ï¿½ï¿½ï¿½_PANASONIC_AC_NKE"
+      - "ï¿½ï¿½ï¿½ï¿½_PANASONIC_AC_DKE"
+      - "ï¿½ï¿½ï¿½ï¿½_PANASONIC_AC_JKE"
+      - "ï¿½ï¿½ï¿½ï¿½_PANASONIC_AC_CKP"
+      - "ï¿½ï¿½ï¿½ï¿½_PANASONIC_AC_RKR"
+      - "ï¿½ï¿½ï¿½ï¿½_PANASONIC_AC32_ï¿½Ô¶ï¿½"
+      - "ï¿½ï¿½ï¿½ï¿½_SAMSUNG_AC_ï¿½Ô¶ï¿½"
+      - "ï¿½ï¿½ï¿½ï¿½_SHARP_AC_ï¿½Ô¶ï¿½"
+      - "ï¿½ï¿½ï¿½ï¿½_SHARP_AC_A907"
+      - "ï¿½ï¿½ï¿½ï¿½_SHARP_AC_A705"
+      - "ï¿½ï¿½ï¿½ï¿½_SHARP_AC_A903"
+      - "ï¿½ï¿½Ö¥_TOSHIBA_AC_ï¿½Ô¶ï¿½"
+      - "ï¿½İ¶ï¿½ï¿½ï¿½_WHIRLPOOL_AC_ï¿½Ô¶ï¿½"
+      - "ï¿½İ¶ï¿½ï¿½ï¿½_WHIRLPOOL_AC_DG11J13A"
+      - "ï¿½İ¶ï¿½ï¿½ï¿½_WHIRLPOOL_AC_DG11J191"
+      - "ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½_ARGO_ï¿½Ô¶ï¿½"
+      - "ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½_ARGO_SAC-WREM2"
+      - "ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½_ARGO_SAC-WREM3"
+      - "ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½_AIRTON_ï¿½Ô¶ï¿½"
+      - "ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½_AIRWELL_ï¿½Ô¶ï¿½"
+      - "ï¿½ï¿½ï¿½ï¿½_AMCOR_ï¿½Ô¶ï¿½"
+      - "ï¿½ï¿½ï¿½ï¿½_BOSCH144_ï¿½Ô¶ï¿½"
+      - "ï¿½ï¿½ï¿½ï¿½_CARRIER_AC64_ï¿½Ô¶ï¿½"
+      - "ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½_CORONA_AC_ï¿½Ô¶ï¿½"
+      - "ï¿½ï¿½ï¿½ï¿½_DELONGHI_AC_ï¿½Ô¶ï¿½"
+      - "ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½_ECOCLIM_ï¿½Ô¶ï¿½"
+      - "ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½_ELECTRA_AC_ï¿½Ô¶ï¿½"
+      - "ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½_GOODWEATHER_ï¿½Ô¶ï¿½"
+      - "ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½_MIRAGE_ï¿½Ô¶ï¿½"
+      - "ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½_MIRAGE_KKG9AC1"
+      - "ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½_MIRAGE_KKG29AC1"
+      - "ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½_NEOCLIMA_ï¿½Ô¶ï¿½"
+      - "ï¿½ï¿½Ë¹_RHOSS_ï¿½Ô¶ï¿½"
+      - "ï¿½ï¿½ï¿½ï¿½_SANYO_AC_ï¿½Ô¶ï¿½"
+      - "ï¿½ï¿½ï¿½ï¿½_SANYO_AC88_ï¿½Ô¶ï¿½"
+      - "Ì©ï¿½ï¿½ï¿½á±´ï¿½ï¿½_TECHNIBEL_AC_ï¿½Ô¶ï¿½"
+      - "Ì©ï¿½ï¿½_TECO_ï¿½Ô¶ï¿½"
+      - "Ì©ï¿½ï¿½Åµï¿½ï¿½_TEKNOPOINT_ï¿½Ô¶ï¿½"
+      - "ï¿½ï¿½ï¿½ï¿½Ë¹ï¿½ï¿½_TRANSCOLD_ï¿½Ô¶ï¿½"
+      - "ï¿½ï¿½ï¿½ï¿½Ì©ï¿½ï¿½_TROTEC_ï¿½Ô¶ï¿½"
+      - "ï¿½ï¿½ï¿½ï¿½Ì©ï¿½ï¿½_TROTEC_3550_ï¿½Ô¶ï¿½"
+      - "ï¿½ï¿½Â³ï¿½ï¿½_TRUMA_ï¿½Ô¶ï¿½"
+      - "Î¬Ë¹ï¿½ï¿½_VESTEL_AC_ï¿½Ô¶ï¿½"
+      - "ï¿½Ö¶ï¿½ï¿½ï¿½Ë¹_VOLTAS_ï¿½Ô¶ï¿½"
+      - "ï¿½Ö¶ï¿½ï¿½ï¿½Ë¹_VOLTAS_122LZF"
+      - "Ô¼ï¿½ï¿½_YORK_ï¿½Ô¶ï¿½"
     set_action:
       - lambda: |-
-          if (ac_set_protocol(x)) {
-            id(ac_protocol_saved) = x;
-          } else {
-            id(ac_protocol).publish_state(id(ac_protocol_saved));
-          }
+          id(ac_controller).set_protocol(x);
       - script.execute: led_action_flash
 
   - platform: template
-    name: "ÄÚ²¿·çËÙ [ac_fan_store]"
+    name: "é£é€Ÿè®¾ç½® [ac_fan]"
     id: ac_fan
-    disabled_by_default: true
+    web_server:
+      sorting_group_id: ac_control_group
+      sorting_weight: 10
     optimistic: true
-    restore_value: true
-    initial_option: "×Ô¶¯"
-    options: ["×Ô¶¯", "×îĞ¡", "µÍ", "ÖĞ", "¸ß", "×î´ó"]
+    restore_value: false
+    initial_option: "è‡ªåŠ¨"
+    options: ["è‡ªåŠ¨", "æœ€å°", "ä½", "ä¸­", "é«˜", "æœ€å¤§"]
     set_action:
-      - lambda: 'ac_set_fan(x);'
+      - lambda: |-
+          id(ac_controller).set_fan(x);
 
-  # ¹Ø»úÇå³ıµÄÊı¾İ£¬²»Ğ´Èë EEPROM¡£
+  # ï¿½Ø»ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½İ£ï¿½ï¿½ï¿½Ğ´ï¿½ï¿½ EEPROMï¿½ï¿½
   - platform: template
-    name: "ÌØÊâÄ£Ê½ [ac_special]"
+    name: "ï¿½ï¿½ï¿½ï¿½Ä£Ê½ [ac_special]"
     id: ac_special_mode
     optimistic: true
     restore_value: false
-    initial_option: "Õı³£"
-    options: ["Õı³£", "Ç¿Á¦", "Ë¯Ãß", "¸ÉÔï"]
+    initial_option: "ï¿½ï¿½ï¿½ï¿½"
+    options: ["ï¿½ï¿½ï¿½ï¿½", "Ç¿ï¿½ï¿½", "Ë¯ï¿½ï¿½", "ï¿½ï¿½ï¿½ï¿½"]
     set_action:
-      - lambda: 'ac_set_special_mode(x);'
+      - lambda: |-
+          id(ac_controller).set_special_mode(x);
       - script.execute: led_action_flash
 
   - platform: template
-    name: "ËÍ·ç·½Ïò [ac_swing]"
+    name: "ï¿½Í·ç·½ï¿½ï¿½ [ac_swing]"
     id: ac_swing_v
     optimistic: true
     restore_value: false
-    initial_option: "¹Ø±Õ"
-    options: ["¹Ø±Õ", "×Ô¶¯", "×î¸ß", "Æ«¸ß", "ÖĞÉÏ", "ÖĞ¼ä", "Æ«µÍ", "×îµÍ"]
+    initial_option: "ï¿½Ø±ï¿½"
+    options: ["ï¿½Ø±ï¿½", "ï¿½Ô¶ï¿½", "ï¿½ï¿½ï¿½", "Æ«ï¿½ï¿½", "ï¿½ï¿½ï¿½ï¿½", "ï¿½Ğ¼ï¿½", "Æ«ï¿½ï¿½", "ï¿½ï¿½ï¿½"]
     set_action:
-      - lambda: 'ac_set_swing_v(x);'
+      - lambda: |-
+          id(ac_controller).set_swing(x);
       - script.execute: led_action_flash
 
 number:
-  # ¹Ø»úÇå³ıµÄÊı¾İ£¬²»Ğ´Èë EEPROM¡£
+  # ï¿½Ø»ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½İ£ï¿½ï¿½ï¿½Ğ´ï¿½ï¿½ EEPROMï¿½ï¿½
   - platform: template
-    name: "¹Ø»ú¶¨Ê±·ÖÖÓ [ac_timer]"
+    name: "ï¿½Ø»ï¿½ï¿½ï¿½Ê±ï¿½ï¿½ï¿½ï¿½ [ac_timer]"
     id: ac_sleep
     optimistic: true
     restore_value: false
@@ -452,7 +420,7 @@ number:
     mode: box
     set_action:
       - lambda: |-
-          ac_set_sleep(x);
+          id(ac_controller).set_timer(x);
           if (x > 0) {
             ESP_LOGI("ac_timer", "Shutdown timer set for %.0f minutes.", x);
           } else {
@@ -461,37 +429,31 @@ number:
       - script.execute: led_action_flash
 
 switch:
-  # µçÔ´ÎªÔËĞĞ×´Ì¬£¬Ê¼ÖÕÒÔ¹Ø»ú×´Ì¬Æô¶¯£¬²»Ğ´Èë EEPROM¡£
   - platform: template
-    name: "¿Õµ÷¿ª¹Ø [ac_power]"
-    id: ac_power
+    name: "ç©ºè°ƒå¼€å…³ [ac_power]"
+    id: ac_power_toggle
     icon: "mdi:air-conditioner"
     optimistic: true
-    restore_mode: RESTORE_DEFAULT_OFF
+    restore_mode: DISABLED
     turn_on_action:
-      - lambda: 'ac_set_power(true);'
-      - lambda: 'id(ac_power).publish_state(true);'
-      - component.update: ha_universal_ac
+      - lambda: 'id(ac_controller).set_power(true);'
       - script.execute: led_action_flash
     turn_off_action:
-      - lambda: 'ac_set_power(false);'
-      - lambda: 'id(ac_power).publish_state(false);'
-      - script.execute: ac_clear_power_off_state
-      - component.update: ha_universal_ac
+      - lambda: 'id(ac_controller).set_power(false);'
       - script.execute: led_action_flash
 
-  # ¹Ø»úºó±£ÁôÇÒĞ´Èë EEPROM µÄ¿Õµ÷Éè¶¨¡£
+  # ï¿½Ø»ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ğ´ï¿½ï¿½ EEPROM ï¿½Ä¿Õµï¿½ï¿½è¶¨ï¿½ï¿½
   - platform: template
-    name: "Ãæ°åµÆ¿ª¹Ø [ac_light]"
+    name: "ï¿½ï¿½ï¿½Æ¿ï¿½ï¿½ï¿½ [ac_light]"
     id: ac_display_light
     optimistic: true
-    restore_mode: RESTORE_DEFAULT_ON
-    turn_on_action: [lambda: 'ac_set_feature("light", true);', script.execute: led_action_flash]
-    turn_off_action: [lambda: 'ac_set_feature("light", false);', script.execute: led_action_flash]
+    restore_mode: DISABLED
+    turn_on_action: [lambda: 'id(ac_controller).set_light(true);', script.execute: led_action_flash]
+    turn_off_action: [lambda: 'id(ac_controller).set_light(false);', script.execute: led_action_flash]
 
 text:
   - platform: template
-    name: "WiFi Ãû³Æ [wifi_setup_ssid]"
+    name: "WiFi ï¿½ï¿½ï¿½ï¿½ [wifi_setup_ssid]"
     id: wifi_ssid_input
     web_server:
       sorting_group_id: wifi_settings_group
@@ -505,7 +467,7 @@ text:
       - lambda: 'id(wifi_ssid_pending) = x;'
 
   - platform: template
-    name: "WiFi ÃÜÂë [wifi_setup_password]"
+    name: "WiFi ï¿½ï¿½ï¿½ï¿½ [wifi_setup_password]"
     id: wifi_password_input
     web_server:
       sorting_group_id: wifi_settings_group
@@ -520,7 +482,7 @@ text:
 
 button:
   - platform: template
-    name: "±£´æ WiFi [wifi_save]"
+    name: "ï¿½ï¿½ï¿½ï¿½ WiFi [wifi_save]"
     web_server:
       sorting_group_id: wifi_settings_group
       sorting_weight: 30
@@ -529,24 +491,24 @@ button:
           condition:
             lambda: 'return !id(wifi_ssid_pending).empty() && !id(wifi_password_pending).empty();'
           then:
-            - lambda: 'id(wifi_status) = "ÕıÔÚÁ¬½ÓĞÂµÄ WiFi";'
+            - lambda: 'id(wifi_status) = "ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Âµï¿½ WiFi";'
             - wifi.configure:
                 ssid: !lambda 'return id(wifi_ssid_pending);'
                 password: !lambda 'return id(wifi_password_pending);'
                 save: true
                 timeout: 30s
                 on_connect:
-                  - lambda: 'id(wifi_status) = "ÒÑ±£´æ²¢Á¬½Ó";'
+                  - lambda: 'id(wifi_status) = "ï¿½Ñ±ï¿½ï¿½æ²¢ï¿½ï¿½ï¿½ï¿½";'
                   - script.execute: led_wifi_flash
                 on_error:
-                  - lambda: 'id(wifi_status) = "WiFi Á¬½ÓÊ§°Ü";'
+                  - lambda: 'id(wifi_status) = "WiFi ï¿½ï¿½ï¿½ï¿½Ê§ï¿½ï¿½";'
                   - script.execute: led_error_flash
           else:
-            - lambda: 'id(wifi_status) = "Ê¹ÓÃÅäÖÃÎÄ¼şÖĞµÄ WiFi";'
+            - lambda: 'id(wifi_status) = "Ê¹ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ä¼ï¿½ï¿½Ğµï¿½ WiFi";'
             - script.execute: led_wifi_flash
 
   - platform: template
-    name: "ÖØÆôÉè±¸ [device_restart]"
+    name: "ï¿½ï¿½ï¿½ï¿½ï¿½è±¸ [device_restart]"
     on_press:
       - script.execute: led_error_flash
       - delay: 300ms
