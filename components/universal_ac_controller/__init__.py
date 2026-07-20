@@ -1,14 +1,25 @@
+from pathlib import Path
+
 import esphome.codegen as cg
-from esphome.components import number, select, switch, text_sensor
+from esphome.components import remote_transmitter, select, switch, text_sensor
 import esphome.config_validation as cv
 from esphome.const import CONF_ID
 
-CONF_PROTOCOL_CONTROL = "protocol_control"
+AUTO_LOAD = [
+    "irext_adapter",
+    "remote_transmitter",
+    "select",
+    "shared",
+    "switch",
+    "text_sensor",
+]
+
+CONF_TRANSMITTER_ID = "transmitter_id"
+CONF_TYPE_CONTROL = "type_control"
+CONF_BRAND_CONTROL = "brand_control"
+CONF_MODEL_CONTROL = "model_control"
 CONF_FAN_CONTROL = "fan_control"
 CONF_SWING_CONTROL = "swing_control"
-CONF_SPECIAL_CONTROL = "special_control"
-CONF_TIMER_CONTROL = "timer_control"
-CONF_LIGHT_CONTROL = "light_control"
 CONF_POWER_CONTROL = "power_control"
 CONF_STATUS_CONTROL = "status_control"
 
@@ -20,12 +31,14 @@ UniversalAcController = universal_ac_controller_ns.class_(
 CONFIG_SCHEMA = cv.Schema(
     {
         cv.GenerateID(): cv.declare_id(UniversalAcController),
-        cv.Required(CONF_PROTOCOL_CONTROL): cv.use_id(select.Select),
+        cv.Required(CONF_TRANSMITTER_ID): cv.use_id(
+            remote_transmitter.RemoteTransmitterComponent
+        ),
+        cv.Required(CONF_TYPE_CONTROL): cv.use_id(select.Select),
+        cv.Required(CONF_BRAND_CONTROL): cv.use_id(select.Select),
+        cv.Required(CONF_MODEL_CONTROL): cv.use_id(select.Select),
         cv.Required(CONF_FAN_CONTROL): cv.use_id(select.Select),
         cv.Required(CONF_SWING_CONTROL): cv.use_id(select.Select),
-        cv.Required(CONF_SPECIAL_CONTROL): cv.use_id(select.Select),
-        cv.Required(CONF_TIMER_CONTROL): cv.use_id(number.Number),
-        cv.Required(CONF_LIGHT_CONTROL): cv.use_id(switch.Switch),
         cv.Required(CONF_POWER_CONTROL): cv.use_id(switch.Switch),
         cv.Required(CONF_STATUS_CONTROL): cv.use_id(text_sensor.TextSensor),
     }
@@ -33,23 +46,25 @@ CONFIG_SCHEMA = cv.Schema(
 
 
 async def to_code(config):
+    irext_core = Path(__file__).resolve().parents[2] / "vendor" / "irext_core"
+    cg.add_library("irext-core", None, repository=f"file://{irext_core.as_posix()}")
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
 
-    protocol_control = await cg.get_variable(config[CONF_PROTOCOL_CONTROL])
+    transmitter = await cg.get_variable(config[CONF_TRANSMITTER_ID])
+    type_control = await cg.get_variable(config[CONF_TYPE_CONTROL])
+    brand_control = await cg.get_variable(config[CONF_BRAND_CONTROL])
+    model_control = await cg.get_variable(config[CONF_MODEL_CONTROL])
     fan_control = await cg.get_variable(config[CONF_FAN_CONTROL])
     swing_control = await cg.get_variable(config[CONF_SWING_CONTROL])
-    special_control = await cg.get_variable(config[CONF_SPECIAL_CONTROL])
-    timer_control = await cg.get_variable(config[CONF_TIMER_CONTROL])
-    light_control = await cg.get_variable(config[CONF_LIGHT_CONTROL])
     power_control = await cg.get_variable(config[CONF_POWER_CONTROL])
     status_control = await cg.get_variable(config[CONF_STATUS_CONTROL])
 
-    cg.add(var.set_protocol_control(protocol_control))
+    cg.add(var.set_transmitter(transmitter))
+    cg.add(var.set_type_control(type_control))
+    cg.add(var.set_brand_control(brand_control))
+    cg.add(var.set_model_control(model_control))
     cg.add(var.set_fan_control(fan_control))
     cg.add(var.set_swing_control(swing_control))
-    cg.add(var.set_special_control(special_control))
-    cg.add(var.set_timer_control(timer_control))
-    cg.add(var.set_light_control(light_control))
     cg.add(var.set_power_control(power_control))
     cg.add(var.set_status_control(status_control))

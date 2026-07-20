@@ -2,11 +2,7 @@ esphome:
   name: ir-remote
   name_add_mac_suffix: true
   includes:
-    - ../components/universal_ac_climate/universal_ac.h
-    - ac_state_manager.h
-  platformio_options:
-    lib_deps:
-      - https://github.com/crankyoldgit/IRremoteESP8266.git#v2.9.0
+    - ../generated/irext
   on_boot:
     - priority: 600
       then:
@@ -31,16 +27,18 @@ external_components:
   - source:
       type: local
       path: ../components
-    components: [universal_ac_controller, universal_ac_climate]
+    components:
+      - irext_adapter
+      - shared
+      - universal_ac_controller
+      - universal_ac_climate
 
 wifi:
   ssid: "honus_2.4G"
   password: "honushonus"
-  ap:  # 万一连不上WiFi，开个热点方便救砖
+  ap:
     ssid: "honus-fallback"
     password: "12345678"
-    # The fallback AP only starts after station association fails. Keep this
-    # short so a powered-off/unavailable router can be recovered quickly.
     ap_timeout: 15s
   on_connect:
     then:
@@ -48,7 +46,6 @@ wifi:
       - component.update: current_wifi_ssid
       - script.stop: led_wifi_missing_blink
       - script.stop: led_error_flash
-      # Stopping a script during its delay leaves the GPIO at its last level.
       - output.turn_off: led_red
       - script.execute: led_wifi_flash
   on_disconnect:
@@ -60,7 +57,8 @@ wifi:
 captive_portal:
 
 logger:
-  baud_rate: 74880  # 关键！非标准波特率
+  baud_rate: 115200
+  deassert_rts_dtr: true
 
 api:
 
@@ -69,8 +67,8 @@ web_server:
   version: 3
   include_internal: false
   sorting_groups:
-    - id: ac_protocol_group
-      name: "空调协议"
+    - id: ac_catalog_group
+      name: "遥控器目录"
       sorting_weight: 10
     - id: ac_control_group
       name: "空调控制"
@@ -78,22 +76,28 @@ web_server:
     - id: wifi_settings_group
       name: "WiFi 设置"
       sorting_weight: 90
-  
+
 ota:
   - platform: esphome
 
-# 红外接收保留用于日志诊断。
+remote_transmitter:
+  id: ir_tx
+  pin: GPIO14
+  carrier_duty_percent: 50%
+
 remote_receiver:
   id: remote_rx
   pin:
     number: GPIO5
     inverted: true
+    mode:
+      input: true
+      pullup: true
+  filter: 100us
+  idle: 10ms
+  buffer_size: 2kb
   dump: all
-  on_raw:
-    then:
-      - script.execute: led_ir_receive_flash
 
-# 易失运行状态，不写入 EEPROM。
 globals:
   - id: wifi_ssid_pending
     type: std::string
@@ -108,20 +112,17 @@ globals:
     restore_value: no
     initial_value: '"使用配置文件中的 WiFi"'
 
-# LED 定义。所有 LED 默认关闭，按运行事件短暂提示。
 output:
   - platform: gpio
     pin:
       number: GPIO12
       inverted: true
-    id: led_red        # 红色 → GPIO12
-
+    id: led_red
   - platform: gpio
     pin:
       number: GPIO13
       inverted: true
-    id: led_yellow     # 黄色 → GPIO13
-
+    id: led_yellow
   - platform: gpio
     pin:
       number: GPIO2
@@ -135,28 +136,24 @@ script:
       - output.turn_on: led_yellow
       - delay: 120ms
       - output.turn_off: led_yellow
-
   - id: led_ir_send_flash
     mode: restart
     then:
       - output.turn_on: led_yellow
       - delay: 80ms
       - output.turn_off: led_yellow
-
   - id: led_wifi_flash
     mode: restart
     then:
       - output.turn_on: led_blue
       - delay: 150ms
       - output.turn_off: led_blue
-
   - id: led_ir_receive_flash
     mode: restart
     then:
       - output.turn_on: led_blue
       - delay: 70ms
       - output.turn_off: led_blue
-
   - id: led_wifi_missing_blink
     mode: restart
     then:
@@ -173,25 +170,12 @@ script:
       - output.turn_on: led_blue
       - delay: 150ms
       - output.turn_off: led_blue
-
   - id: led_error_flash
     mode: restart
     then:
       - output.turn_on: led_red
       - delay: 250ms
       - output.turn_off: led_red
-
-interval:
-  - interval: 1s
-    then:
-      - if:
-          condition:
-            lambda: 'return id(ac_controller).timer_expired();'
-          then:
-            - lambda: 'ESP_LOGI("ac_timer", "Shutdown timer expired; turning AC off.");'
-            - climate.control:
-                id: ha_universal_ac
-                mode: "OFF"
 
 sensor:
   - platform: template
@@ -215,12 +199,10 @@ text_sensor:
       std::array<char, wifi::SSID_BUFFER_SIZE> ssid{};
       return std::string(wifi::global_wifi_component->wifi_ssid_to(ssid));
     update_interval: never
-
   - platform: template
     name: "红外状态 [ir_status]"
     id: ir_status
     update_interval: never
-
   - platform: template
     name: "固件版本 [firmware_version]"
     id: firmware_version
@@ -230,12 +212,12 @@ text_sensor:
 
 universal_ac_controller:
   id: ac_controller
-  protocol_control: ac_protocol
+  transmitter_id: ir_tx
+  type_control: ac_device_type
+  brand_control: ac_brand
+  model_control: ac_model
   fan_control: ac_fan
-  swing_control: ac_swing_v
-  special_control: ac_special_mode
-  timer_control: ac_sleep
-  light_control: ac_display_light
+  swing_control: ac_swing
   power_control: ac_power_toggle
   status_control: ir_status
 
@@ -246,186 +228,70 @@ climate:
     controller: ac_controller
 
 select:
-  # 关机后保留且写入 EEPROM 的空调设定。
   - platform: template
-    name: "空调协议 [ac_protocol]"
-    id: ac_protocol
+    name: "设备类型 [ac_device_type]"
+    id: ac_device_type
     optimistic: true
     restore_value: false
+    options: ["加载中 [0]"]
+    initial_option: "加载中 [0]"
     web_server:
-      sorting_group_id: ac_protocol_group
+      sorting_group_id: ac_catalog_group
       sorting_weight: 10
-    initial_option: "格力_GREE_YAW1F"
-    options:
-      - "格力_GREE_自动"
-      - "格力_GREE_YAW1F"
-      - "格力_GREE_YBOFB"
-      - "格力_GREE_YX1FSF"
-      - "美的_MIDEA_自动"
-      - "海尔_HAIER_AC_自动"
-      - "海尔_HAIER_AC160_自动"
-      - "海尔_HAIER_AC176_自动"
-      - "海尔_HAIER_AC176_V9014557-A"
-      - "海尔_HAIER_AC176_V9014557-B"
-      - "海尔_HAIER_AC_YRW02_自动"
-      - "TCL_TCL112AC_自动"
-      - "TCL_TCL112AC_TAC09CHSD"
-      - "TCL_TCL112AC_GZ055BE1"
-      - "科龙_KELON_自动"
-      - "凯尔文_KELVINATOR_自动"
-      - "酷莱斯_COOLIX_自动"
-      - "大金_DAIKIN_自动"
-      - "大金_DAIKIN2_自动"
-      - "大金_DAIKIN64_自动"
-      - "大金_DAIKIN128_自动"
-      - "大金_DAIKIN152_自动"
-      - "大金_DAIKIN160_自动"
-      - "大金_DAIKIN176_自动"
-      - "大金_DAIKIN216_自动"
-      - "富士通_FUJITSU_AC_自动"
-      - "富士通_FUJITSU_AC_ARRAH2E"
-      - "富士通_FUJITSU_AC_ARDB1"
-      - "富士通_FUJITSU_AC_ARREB1E"
-      - "富士通_FUJITSU_AC_ARJW2"
-      - "富士通_FUJITSU_AC_ARRY4"
-      - "富士通_FUJITSU_AC_ARREW4E"
-      - "日立_HITACHI_AC_自动"
-      - "日立_HITACHI_AC1_自动"
-      - "日立_HITACHI_AC1_R-LT0541-HTA-A"
-      - "日立_HITACHI_AC1_R-LT0541-HTA-B"
-      - "日立_HITACHI_AC264_自动"
-      - "日立_HITACHI_AC296_自动"
-      - "日立_HITACHI_AC344_自动"
-      - "日立_HITACHI_AC424_自动"
-      - "LG_LG_自动"
-      - "LG_LG_GE6711AR2853M"
-      - "LG_LG_AKB75215403"
-      - "LG_LG_AKB74955603"
-      - "LG_LG_AKB73757604"
-      - "LG_LG_LG6711A20083V"
-      - "LG_LG2_自动"
-      - "LG_LG2_GE6711AR2853M"
-      - "LG_LG2_AKB75215403"
-      - "LG_LG2_AKB74955603"
-      - "LG_LG2_AKB73757604"
-      - "LG_LG2_LG6711A20083V"
-      - "三菱电机_MITSUBISHI_AC_自动"
-      - "三菱电机_MITSUBISHI112_自动"
-      - "三菱电机_MITSUBISHI136_自动"
-      - "三菱重工_MITSUBISHI_HEAVY_88_自动"
-      - "三菱重工_MITSUBISHI_HEAVY_152_自动"
-      - "松下_PANASONIC_AC_自动"
-      - "松下_PANASONIC_AC_LKE"
-      - "松下_PANASONIC_AC_NKE"
-      - "松下_PANASONIC_AC_DKE"
-      - "松下_PANASONIC_AC_JKE"
-      - "松下_PANASONIC_AC_CKP"
-      - "松下_PANASONIC_AC_RKR"
-      - "松下_PANASONIC_AC32_自动"
-      - "三星_SAMSUNG_AC_自动"
-      - "夏普_SHARP_AC_自动"
-      - "夏普_SHARP_AC_A907"
-      - "夏普_SHARP_AC_A705"
-      - "夏普_SHARP_AC_A903"
-      - "东芝_TOSHIBA_AC_自动"
-      - "惠而浦_WHIRLPOOL_AC_自动"
-      - "惠而浦_WHIRLPOOL_AC_DG11J13A"
-      - "惠而浦_WHIRLPOOL_AC_DG11J191"
-      - "阿尔戈_ARGO_自动"
-      - "阿尔戈_ARGO_SAC-WREM2"
-      - "阿尔戈_ARGO_SAC-WREM3"
-      - "艾尔顿_AIRTON_自动"
-      - "爱尔威_AIRWELL_自动"
-      - "安可_AMCOR_自动"
-      - "博世_BOSCH144_自动"
-      - "开利_CARRIER_AC64_自动"
-      - "科罗娜_CORONA_AC_自动"
-      - "德龙_DELONGHI_AC_自动"
-      - "伊可林_ECOCLIM_自动"
-      - "伊莱克特拉_ELECTRA_AC_自动"
-      - "好天气_GOODWEATHER_自动"
-      - "米拉奇_MIRAGE_自动"
-      - "米拉奇_MIRAGE_KKG9AC1"
-      - "米拉奇_MIRAGE_KKG29AC1"
-      - "新气候_NEOCLIMA_自动"
-      - "瑞斯_RHOSS_自动"
-      - "三洋_SANYO_AC_自动"
-      - "三洋_SANYO_AC88_自动"
-      - "泰克尼贝尔_TECHNIBEL_AC_自动"
-      - "泰科_TECO_自动"
-      - "泰克诺点_TEKNOPOINT_自动"
-      - "特兰斯科_TRANSCOLD_自动"
-      - "特洛泰克_TROTEC_自动"
-      - "特洛泰克_TROTEC_3550_自动"
-      - "特鲁玛_TRUMA_自动"
-      - "维斯特_VESTEL_AC_自动"
-      - "沃尔塔斯_VOLTAS_自动"
-      - "沃尔塔斯_VOLTAS_122LZF"
-      - "约克_YORK_自动"
     set_action:
-      - lambda: |-
-          id(ac_controller).set_protocol(x);
+      - lambda: 'id(ac_controller).set_type(x);'
       - script.execute: led_action_flash
-
+  - platform: template
+    name: "品牌 [ac_brand]"
+    id: ac_brand
+    optimistic: true
+    restore_value: false
+    options: ["加载中 [0]"]
+    initial_option: "加载中 [0]"
+    web_server:
+      sorting_group_id: ac_catalog_group
+      sorting_weight: 20
+    set_action:
+      - lambda: 'id(ac_controller).set_brand(x);'
+      - script.execute: led_action_flash
+  - platform: template
+    name: "型号 [ac_model]"
+    id: ac_model
+    optimistic: true
+    restore_value: false
+    options: ["加载中 [0]"]
+    initial_option: "加载中 [0]"
+    web_server:
+      sorting_group_id: ac_catalog_group
+      sorting_weight: 30
+    set_action:
+      - lambda: 'id(ac_controller).set_model(x);'
+      - script.execute: led_action_flash
   - platform: template
     name: "风速设置 [ac_fan]"
     id: ac_fan
+    optimistic: true
+    restore_value: false
+    options: ["自动", "低", "中", "高"]
+    initial_option: "自动"
     web_server:
       sorting_group_id: ac_control_group
       sorting_weight: 10
-    optimistic: true
-    restore_value: false
-    initial_option: "自动"
-    options: ["自动", "最小", "低", "中", "高", "最大"]
     set_action:
-      - lambda: |-
-          id(ac_controller).set_fan(x);
-
-  # 关机清除的数据，不写入 EEPROM。
-  - platform: template
-    name: "特殊模式 [ac_special]"
-    id: ac_special_mode
-    optimistic: true
-    restore_value: false
-    initial_option: "正常"
-    options: ["正常", "强力", "睡眠", "干燥"]
-    set_action:
-      - lambda: |-
-          id(ac_controller).set_special_mode(x);
+      - lambda: 'id(ac_controller).set_fan(x);'
       - script.execute: led_action_flash
-
   - platform: template
-    name: "送风方向 [ac_swing]"
-    id: ac_swing_v
+    name: "摆风设置 [ac_swing]"
+    id: ac_swing
     optimistic: true
     restore_value: false
+    options: ["关闭", "摆风"]
     initial_option: "关闭"
-    options: ["关闭", "自动", "最高", "偏高", "中上", "中间", "偏低", "最低"]
+    web_server:
+      sorting_group_id: ac_control_group
+      sorting_weight: 20
     set_action:
-      - lambda: |-
-          id(ac_controller).set_swing(x);
-      - script.execute: led_action_flash
-
-number:
-  # 关机清除的数据，不写入 EEPROM。
-  - platform: template
-    name: "关机定时分钟 [ac_timer]"
-    id: ac_sleep
-    optimistic: true
-    restore_value: false
-    initial_value: 0
-    min_value: 0
-    max_value: 720
-    step: 1
-    mode: box
-    set_action:
-      - lambda: |-
-          id(ac_controller).set_timer(x);
-          if (x > 0) {
-            ESP_LOGI("ac_timer", "Shutdown timer set for %.0f minutes.", x);
-          } else {
-            ESP_LOGI("ac_timer", "Shutdown timer cancelled.");
-          }
+      - lambda: 'id(ac_controller).set_swing(x);'
       - script.execute: led_action_flash
 
 switch:
@@ -435,21 +301,15 @@ switch:
     icon: "mdi:air-conditioner"
     optimistic: true
     restore_mode: DISABLED
+    web_server:
+      sorting_group_id: ac_control_group
+      sorting_weight: 30
     turn_on_action:
       - lambda: 'id(ac_controller).set_power(true);'
       - script.execute: led_action_flash
     turn_off_action:
       - lambda: 'id(ac_controller).set_power(false);'
       - script.execute: led_action_flash
-
-  # 关机后保留且写入 EEPROM 的空调设定。
-  - platform: template
-    name: "面板灯开关 [ac_light]"
-    id: ac_display_light
-    optimistic: true
-    restore_mode: DISABLED
-    turn_on_action: [lambda: 'id(ac_controller).set_light(true);', script.execute: led_action_flash]
-    turn_off_action: [lambda: 'id(ac_controller).set_light(false);', script.execute: led_action_flash]
 
 text:
   - platform: template
@@ -465,7 +325,6 @@ text:
     max_length: 32
     set_action:
       - lambda: 'id(wifi_ssid_pending) = x;'
-
   - platform: template
     name: "WiFi 密码 [wifi_setup_password]"
     id: wifi_password_input
@@ -506,7 +365,6 @@ button:
           else:
             - lambda: 'id(wifi_status) = "使用配置文件中的 WiFi";'
             - script.execute: led_wifi_flash
-
   - platform: template
     name: "重启设备 [device_restart]"
     on_press:

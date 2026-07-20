@@ -1,0 +1,11 @@
+{
+  "name": "irext-core",
+  "version": "1.5.3",
+  "build": {
+    "srcDir": ".",
+    "includeDir": "include",
+    "srcFilter": [
+      "+<*.c>"
+    ]
+  }
+}

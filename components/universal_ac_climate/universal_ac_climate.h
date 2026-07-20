@@ -13,28 +13,45 @@ class UniversalAcClimate : public climate::Climate, public Component {
   }
 
   void setup() override {
-    if (this->controller_ != nullptr) {
+    if (this->controller_ != nullptr)
       this->controller_->add_on_state_callback([this]() { this->sync_state_(); });
-    }
     this->sync_state_();
   }
+
  protected:
   climate::ClimateTraits traits() override {
     climate::ClimateTraits traits;
     traits.add_supported_mode(climate::CLIMATE_MODE_OFF);
-    traits.add_supported_mode(climate::CLIMATE_MODE_AUTO);
-    traits.add_supported_mode(climate::CLIMATE_MODE_COOL);
-    traits.add_supported_mode(climate::CLIMATE_MODE_HEAT);
-    traits.add_supported_mode(climate::CLIMATE_MODE_DRY);
-    traits.add_supported_mode(climate::CLIMATE_MODE_FAN_ONLY);
-    traits.add_supported_fan_mode(climate::CLIMATE_FAN_AUTO);
-    traits.add_supported_fan_mode(climate::CLIMATE_FAN_LOW);
-    traits.add_supported_fan_mode(climate::CLIMATE_FAN_MEDIUM);
-    traits.add_supported_fan_mode(climate::CLIMATE_FAN_HIGH);
+    if (this->controller_ == nullptr) {
+      traits.set_visual_min_temperature(16);
+      traits.set_visual_max_temperature(30);
+      traits.set_visual_temperature_step(1);
+      return traits;
+    }
+    const auto &capabilities = this->controller_->capabilities();
+    if (!capabilities.valid || (capabilities.modes & (1U << AC_MODE_AUTO)) != 0)
+      traits.add_supported_mode(climate::CLIMATE_MODE_AUTO);
+    if (!capabilities.valid || (capabilities.modes & (1U << AC_MODE_COOL)) != 0)
+      traits.add_supported_mode(climate::CLIMATE_MODE_COOL);
+    if (!capabilities.valid || (capabilities.modes & (1U << AC_MODE_HEAT)) != 0)
+      traits.add_supported_mode(climate::CLIMATE_MODE_HEAT);
+    if (!capabilities.valid || (capabilities.modes & (1U << AC_MODE_DRY)) != 0)
+      traits.add_supported_mode(climate::CLIMATE_MODE_DRY);
+    if (!capabilities.valid || (capabilities.modes & (1U << AC_MODE_FAN)) != 0)
+      traits.add_supported_mode(climate::CLIMATE_MODE_FAN_ONLY);
+    if (!capabilities.valid || (capabilities.wind_speeds & (1U << AC_WS_AUTO)) != 0)
+      traits.add_supported_fan_mode(climate::CLIMATE_FAN_AUTO);
+    if (!capabilities.valid || (capabilities.wind_speeds & (1U << AC_WS_LOW)) != 0)
+      traits.add_supported_fan_mode(climate::CLIMATE_FAN_LOW);
+    if (!capabilities.valid || (capabilities.wind_speeds & (1U << AC_WS_MEDIUM)) != 0)
+      traits.add_supported_fan_mode(climate::CLIMATE_FAN_MEDIUM);
+    if (!capabilities.valid || (capabilities.wind_speeds & (1U << AC_WS_HIGH)) != 0)
+      traits.add_supported_fan_mode(climate::CLIMATE_FAN_HIGH);
     traits.add_supported_swing_mode(climate::CLIMATE_SWING_OFF);
-    traits.add_supported_swing_mode(climate::CLIMATE_SWING_VERTICAL);
-    traits.set_visual_min_temperature(16);
-    traits.set_visual_max_temperature(30);
+    if (!capabilities.valid || (capabilities.swing & 0x02U) != 0)
+      traits.add_supported_swing_mode(climate::CLIMATE_SWING_VERTICAL);
+    traits.set_visual_min_temperature(capabilities.valid ? capabilities.minimum_temperature + 16 : 16);
+    traits.set_visual_max_temperature(capabilities.valid ? capabilities.maximum_temperature + 16 : 30);
     traits.set_visual_temperature_step(1);
     return traits;
   }
@@ -42,12 +59,11 @@ class UniversalAcClimate : public climate::Climate, public Component {
   void control(const climate::ClimateCall &call) override {
     if (this->controller_ == nullptr) return;
 
-    const auto &ac = this->controller_->ac();
-    bool power = ac.power();
-    auto mode = ac.mode();
-    float temperature = ac.temperature();
-    auto fan = ac.fan();
-    auto swing_v = ac.swing_v();
+    bool power = this->controller_->power();
+    t_ac_mode mode = this->controller_->mode();
+    float temperature = this->controller_->temperature();
+    t_ac_wind_speed fan = this->controller_->fan();
+    t_ac_swing swing = this->controller_->swing();
 
     if (call.get_mode().has_value()) {
       switch (*call.get_mode()) {
@@ -56,25 +72,23 @@ class UniversalAcClimate : public climate::Climate, public Component {
           break;
         case climate::CLIMATE_MODE_AUTO:
           power = true;
-          mode = stdAc::opmode_t::kAuto;
-          break;
-        case climate::CLIMATE_MODE_COOL:
-          power = true;
-          mode = stdAc::opmode_t::kCool;
+          mode = AC_MODE_AUTO;
           break;
         case climate::CLIMATE_MODE_HEAT:
           power = true;
-          mode = stdAc::opmode_t::kHeat;
+          mode = AC_MODE_HEAT;
           break;
         case climate::CLIMATE_MODE_DRY:
           power = true;
-          mode = stdAc::opmode_t::kDry;
+          mode = AC_MODE_DRY;
           break;
         case climate::CLIMATE_MODE_FAN_ONLY:
           power = true;
-          mode = stdAc::opmode_t::kFan;
+          mode = AC_MODE_FAN;
           break;
         default:
+          power = true;
+          mode = AC_MODE_COOL;
           break;
       }
     }
@@ -84,57 +98,53 @@ class UniversalAcClimate : public climate::Climate, public Component {
     if (call.get_fan_mode().has_value()) {
       switch (*call.get_fan_mode()) {
         case climate::CLIMATE_FAN_LOW:
-          fan = stdAc::fanspeed_t::kLow;
+          fan = AC_WS_LOW;
           break;
         case climate::CLIMATE_FAN_MEDIUM:
-          fan = stdAc::fanspeed_t::kMedium;
+          fan = AC_WS_MEDIUM;
           break;
         case climate::CLIMATE_FAN_HIGH:
-          fan = stdAc::fanspeed_t::kHigh;
+          fan = AC_WS_HIGH;
           break;
         default:
-          fan = stdAc::fanspeed_t::kAuto;
+          fan = AC_WS_AUTO;
           break;
       }
     }
 
-    if (call.get_swing_mode().has_value()) {
-      swing_v = *call.get_swing_mode() == climate::CLIMATE_SWING_VERTICAL
-                    ? stdAc::swingv_t::kAuto
-                    : stdAc::swingv_t::kOff;
-    }
+    if (call.get_swing_mode().has_value())
+      swing = *call.get_swing_mode() == climate::CLIMATE_SWING_VERTICAL ? AC_SWING_ON : AC_SWING_OFF;
 
-    this->controller_->apply_climate(power, mode, temperature, fan, swing_v);
+    this->controller_->apply_climate(power, mode, temperature, fan, swing);
   }
 
   void sync_state_() {
     if (this->controller_ == nullptr) return;
 
-    const auto &ac = this->controller_->ac();
-    this->target_temperature = ac.temperature();
-    this->fan_mode = this->to_fan_mode_(ac.fan());
-    this->swing_mode = ac.swing_v() == stdAc::swingv_t::kAuto
+    this->target_temperature = this->controller_->temperature();
+    this->fan_mode = this->to_fan_mode_(this->controller_->fan());
+    this->swing_mode = this->controller_->swing() == AC_SWING_ON
                            ? climate::CLIMATE_SWING_VERTICAL
                            : climate::CLIMATE_SWING_OFF;
 
-    if (!ac.power()) {
+    if (!this->controller_->power()) {
       this->mode = climate::CLIMATE_MODE_OFF;
       this->action = climate::CLIMATE_ACTION_OFF;
     } else {
-      switch (ac.mode()) {
-        case stdAc::opmode_t::kHeat:
+      switch (this->controller_->mode()) {
+        case AC_MODE_HEAT:
           this->mode = climate::CLIMATE_MODE_HEAT;
           this->action = climate::CLIMATE_ACTION_HEATING;
           break;
-        case stdAc::opmode_t::kDry:
+        case AC_MODE_DRY:
           this->mode = climate::CLIMATE_MODE_DRY;
           this->action = climate::CLIMATE_ACTION_DRYING;
           break;
-        case stdAc::opmode_t::kFan:
+        case AC_MODE_FAN:
           this->mode = climate::CLIMATE_MODE_FAN_ONLY;
           this->action = climate::CLIMATE_ACTION_FAN;
           break;
-        case stdAc::opmode_t::kAuto:
+        case AC_MODE_AUTO:
           this->mode = climate::CLIMATE_MODE_AUTO;
           this->action = climate::CLIMATE_ACTION_IDLE;
           break;
@@ -148,18 +158,12 @@ class UniversalAcClimate : public climate::Climate, public Component {
     this->publish_state();
   }
 
-  static climate::ClimateFanMode to_fan_mode_(stdAc::fanspeed_t fan) {
+  static climate::ClimateFanMode to_fan_mode_(t_ac_wind_speed fan) {
     switch (fan) {
-      case stdAc::fanspeed_t::kLow:
-      case stdAc::fanspeed_t::kMin:
-        return climate::CLIMATE_FAN_LOW;
-      case stdAc::fanspeed_t::kMedium:
-        return climate::CLIMATE_FAN_MEDIUM;
-      case stdAc::fanspeed_t::kHigh:
-      case stdAc::fanspeed_t::kMax:
-        return climate::CLIMATE_FAN_HIGH;
-      default:
-        return climate::CLIMATE_FAN_AUTO;
+      case AC_WS_LOW: return climate::CLIMATE_FAN_LOW;
+      case AC_WS_MEDIUM: return climate::CLIMATE_FAN_MEDIUM;
+      case AC_WS_HIGH: return climate::CLIMATE_FAN_HIGH;
+      default: return climate::CLIMATE_FAN_AUTO;
     }
   }
 

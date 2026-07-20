@@ -1,0 +1,1 @@
+# Shared C++ headers for local components.

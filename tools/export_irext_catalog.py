@@ -205,18 +205,25 @@ def emit_catalog_index_header(
         "struct BrandEntry { uint8_t type_index; const char *name; };",
         "struct ControlCodeEntry { uint16_t brand_index; const char *code; uint32_t offset; uint16_t length; uint8_t category_id; uint8_t subcategory; };",
         "",
-        "static const TypeEntry types[] PROGMEM = {",
     ]
-    for category in categories:
-        lines.append(f'  {{"{cpp_string(category["name_cn"] or category["name"])}"}},')
-    lines.extend(["};", "", "static const BrandEntry brands[] PROGMEM = {"])
-    for type_index, brand_name, brand_name_cn in brands:
+    for index, category in enumerate(categories):
+        label = cpp_string(category["name_cn"] or category["name"])
+        lines.append(f'static const char type_name_{index}[] PROGMEM = "{label}";')
+    for index, (_, brand_name, brand_name_cn) in enumerate(brands):
         label = brand_name_cn or brand_name
-        lines.append(f'  {{{type_index}, "{cpp_string(label)}"}},')
+        lines.append(f'static const char brand_name_{index}[] PROGMEM = "{cpp_string(label)}";')
+    for index, (_, code, _, _, _, _) in enumerate(entries):
+        lines.append(f'static const char code_name_{index}[] PROGMEM = "{cpp_string(code)}";')
+    lines.extend(["", "static const TypeEntry types[] PROGMEM = {"])
+    for index, _ in enumerate(categories):
+        lines.append(f"  {{type_name_{index}}},")
+    lines.extend(["};", "", "static const BrandEntry brands[] PROGMEM = {"])
+    for index, (type_index, _, _) in enumerate(brands):
+        lines.append(f"  {{{type_index}, brand_name_{index}}},")
     lines.extend(["};", "", "static const ControlCodeEntry control_codes[] PROGMEM = {"])
-    for brand_index, code, offset, length, category_id, subcategory in entries:
+    for index, (brand_index, _, offset, length, category_id, subcategory) in enumerate(entries):
         lines.append(
-            f'  {{{brand_index}, "{cpp_string(code)}", {offset}UL, {length}, '
+            f"  {{{brand_index}, code_name_{index}, {offset}UL, {length}, "
             f"{category_id}, {subcategory}}},"
         )
     lines.extend(
