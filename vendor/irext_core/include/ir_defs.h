@@ -64,7 +64,9 @@ void noprint(const char *fmt, ...);
 #else
 #define ir_printf noprint
 #endif
-#define USER_DATA_SIZE 2048
+#ifndef USER_DATA_SIZE
+#define USER_DATA_SIZE 1024
+#endif
 // #define USER_DATA_SIZE 4096
 
 #ifdef __cplusplus

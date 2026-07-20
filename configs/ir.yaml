@@ -1,0 +1,348 @@
+esphome:
+  name: ir-remote
+  name_add_mac_suffix: true
+  includes:
+    - ../generated/irext
+  platformio_options:
+    extra_scripts:
+      - post:../../../../tools/merge_irext_catalog.py
+  on_boot:
+    - priority: 600
+      then:
+        - output.turn_off: led_red
+        - output.turn_off: led_yellow
+        - output.turn_off: led_blue
+        - if:
+            condition:
+              wifi.connected:
+            then:
+              - script.execute: led_wifi_flash
+            else:
+              - script.execute: led_wifi_missing_blink
+    - priority: -100
+      then:
+        - component.update: firmware_version
+
+esp8266:
+  board: esp12e
+
+external_components:
+  - source:
+      type: local
+      path: ../components
+    components:
+      - irext_adapter
+      - shared
+      - universal_ac_controller
+      - universal_ac_climate
+
+wifi:
+  ssid: "honus_2.4G"
+  password: "honushonus"
+  ap:
+    ssid: "honus-fallback"
+    password: "12345678"
+    ap_timeout: 15s
+  on_connect:
+    then:
+      - lambda: 'id(wifi_status) = "已连接";'
+      - component.update: current_wifi_ssid
+      - script.stop: led_wifi_missing_blink
+      - script.stop: led_error_flash
+      - output.turn_off: led_red
+      - script.execute: led_wifi_flash
+  on_disconnect:
+    then:
+      - lambda: 'id(wifi_status) = "连接已断开";'
+      - script.execute: led_error_flash
+      - script.execute: led_wifi_missing_blink
+
+captive_portal:
+
+logger:
+  baud_rate: 115200
+  level: INFO
+  deassert_rts_dtr: true
+
+api:
+
+web_server:
+  port: 80
+  version: 3
+  include_internal: false
+  sorting_groups:
+    - id: ac_catalog_group
+      name: "遥控器目录"
+      sorting_weight: 10
+    - id: ac_control_group
+      name: "空调控制"
+      sorting_weight: 20
+
+ota:
+  - platform: esphome
+
+remote_transmitter:
+  id: ir_tx
+  pin: GPIO14
+  carrier_duty_percent: 50%
+
+remote_receiver:
+  id: remote_rx
+  pin:
+    number: GPIO5
+    inverted: true
+    mode:
+      input: true
+      pullup: true
+  filter: 100us
+  idle: 10ms
+  # Smaller buffer + no dump logging reduces RAM and soft-WDT risk on noisy RX lines.
+  buffer_size: 1kb
+
+globals:
+  - id: wifi_status
+    type: std::string
+    restore_value: no
+    initial_value: '"使用配置文件中的 WiFi"'
+
+output:
+  - platform: gpio
+    pin:
+      number: GPIO12
+      inverted: true
+    id: led_red
+  - platform: gpio
+    pin:
+      number: GPIO13
+      inverted: true
+    id: led_yellow
+  - platform: gpio
+    pin:
+      number: GPIO2
+      inverted: true
+    id: led_blue
+
+script:
+  - id: led_action_flash
+    mode: restart
+    then:
+      - output.turn_on: led_yellow
+      - delay: 120ms
+      - output.turn_off: led_yellow
+  - id: led_ir_send_flash
+    mode: restart
+    then:
+      - output.turn_on: led_yellow
+      - delay: 80ms
+      - output.turn_off: led_yellow
+  - id: led_wifi_flash
+    mode: restart
+    then:
+      - output.turn_on: led_blue
+      - delay: 150ms
+      - output.turn_off: led_blue
+  - id: led_ir_receive_flash
+    mode: restart
+    then:
+      - output.turn_on: led_blue
+      - delay: 70ms
+      - output.turn_off: led_blue
+  - id: led_wifi_missing_blink
+    mode: restart
+    then:
+      - while:
+          condition:
+            not:
+              wifi.connected:
+          then:
+            - output.turn_on: led_red
+            - delay: 180ms
+            - output.turn_off: led_red
+            - delay: 1800ms
+      - delay: 100ms
+      - output.turn_on: led_blue
+      - delay: 150ms
+      - output.turn_off: led_blue
+  - id: led_error_flash
+    mode: restart
+    then:
+      - output.turn_on: led_red
+      - delay: 250ms
+      - output.turn_off: led_red
+
+sensor:
+  - platform: template
+    id: ir_send_event
+    internal: true
+    update_interval: 500ms
+    lambda: 'return static_cast<float>(id(ac_controller).send_sequence());'
+    on_value:
+      - lambda: |-
+          static uint32_t previous = 0;
+          const auto current = static_cast<uint32_t>(x);
+          if (current != previous && current != 0) id(led_ir_send_flash).execute();
+          previous = current;
+
+text_sensor:
+  - platform: template
+    name: "当前 WiFi 名称 [wifi_current]"
+    id: current_wifi_ssid
+    lambda: |-
+      if (!wifi::global_wifi_component->is_connected()) return {"未连接"};
+      std::array<char, wifi::SSID_BUFFER_SIZE> ssid{};
+      return std::string(wifi::global_wifi_component->wifi_ssid_to(ssid));
+    update_interval: never
+  - platform: template
+    name: "红外状态 [ir_status]"
+    id: ir_status
+    update_interval: never
+  - platform: template
+    name: "型号列表 [ac_model_list]"
+    id: ac_model_list
+    update_interval: never
+    web_server:
+      sorting_group_id: ac_catalog_group
+      sorting_weight: 29
+  - platform: template
+    name: "固件版本 [firmware_version]"
+    id: firmware_version
+    icon: "mdi:calendar"
+    lambda: 'return std::string(__DATE__);'
+    update_interval: never
+
+universal_ac_controller:
+  id: ac_controller
+  transmitter_id: ir_tx
+  type_control: ac_device_type
+  brand_control: ac_brand
+  model_control: ac_model
+  fan_control: ac_fan
+  swing_control: ac_swing
+  power_control: ac_power_toggle
+  status_control: ir_status
+  model_list_control: ac_model_list
+
+climate:
+  - platform: universal_ac_climate
+    name: "空调遥控 [ac_climate]"
+    id: ha_universal_ac
+    controller: ac_controller
+
+select:
+  - platform: template
+    name: "设备类型 [ac_device_type]"
+    id: ac_device_type
+    optimistic: true
+    restore_value: false
+    options: ["请选择设备类型 [0]"]
+    initial_option: "请选择设备类型 [0]"
+    web_server:
+      sorting_group_id: ac_catalog_group
+      sorting_weight: 10
+    set_action:
+      - lambda: 'id(ac_controller).set_type(x);'
+      - script.execute: led_action_flash
+  - platform: template
+    name: "品牌 [ac_brand]"
+    id: ac_brand
+    optimistic: true
+    restore_value: false
+    options: ["请先选择设备类型 [0]"]
+    initial_option: "请先选择设备类型 [0]"
+    web_server:
+      sorting_group_id: ac_catalog_group
+      sorting_weight: 20
+    set_action:
+      - lambda: 'id(ac_controller).set_brand(x);'
+      - script.execute: led_action_flash
+  - platform: template
+    name: "型号 [ac_model]"
+    id: ac_model
+    optimistic: true
+    restore_value: false
+    options: ["请先选择品牌 [0]", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10"]
+    initial_option: "请先选择品牌 [0]"
+    web_server:
+      sorting_group_id: ac_catalog_group
+      sorting_weight: 30
+    set_action:
+      - lambda: 'id(ac_controller).set_model(x);'
+      - script.execute: led_action_flash
+  - platform: template
+    name: "风速设置 [ac_fan]"
+    id: ac_fan
+    optimistic: true
+    restore_value: false
+    options: ["自动", "低", "中", "高"]
+    initial_option: "自动"
+    web_server:
+      sorting_group_id: ac_control_group
+      sorting_weight: 10
+    set_action:
+      - lambda: 'id(ac_controller).set_fan(x);'
+      - script.execute: led_action_flash
+  - platform: template
+    name: "摆风设置 [ac_swing]"
+    id: ac_swing
+    optimistic: true
+    restore_value: false
+    options: ["关闭", "摆风"]
+    initial_option: "关闭"
+    web_server:
+      sorting_group_id: ac_control_group
+      sorting_weight: 20
+    set_action:
+      - lambda: 'id(ac_controller).set_swing(x);'
+      - script.execute: led_action_flash
+
+switch:
+  - platform: template
+    name: "空调开关 [ac_power]"
+    id: ac_power_toggle
+    icon: "mdi:air-conditioner"
+    lambda: 'return id(ac_controller).power();'
+    restore_mode: DISABLED
+    web_server:
+      sorting_group_id: ac_control_group
+      sorting_weight: 40
+    turn_on_action:
+      - lambda: 'id(ac_controller).set_power(true);'
+      - script.execute: led_action_flash
+    turn_off_action:
+      - lambda: 'id(ac_controller).set_power(false);'
+      - script.execute: led_action_flash
+
+button:
+  - platform: template
+    name: "型号上一页 [ac_model_prev]"
+    id: ac_model_prev
+    web_server:
+      sorting_group_id: ac_catalog_group
+      sorting_weight: 40
+    on_press:
+      - lambda: 'id(ac_controller).previous_model_page();'
+      - script.execute: led_action_flash
+  - platform: template
+    name: "型号下一页 [ac_model_next]"
+    id: ac_model_next
+    web_server:
+      sorting_group_id: ac_catalog_group
+      sorting_weight: 50
+    on_press:
+      - lambda: 'id(ac_controller).next_model_page();'
+      - script.execute: led_action_flash
+  - platform: template
+    name: "固定风向切换 [ac_wind_direction]"
+    id: ac_wind_direction
+    web_server:
+      sorting_group_id: ac_control_group
+      sorting_weight: 30
+    on_press:
+      - lambda: 'id(ac_controller).change_wind_direction();'
+      - script.execute: led_action_flash
+  - platform: template
+    name: "重启设备 [device_restart]"
+    on_press:
+      - script.execute: led_error_flash
+      - delay: 300ms
+      - lambda: 'App.safe_reboot();'
